@@ -22,7 +22,7 @@ async function main() {
     update: {},
     create: {
       name: 'user',
-      permissions: '["$authenticated","requests.read","requests.create","requests.delete","support.read","support.create","support.write"]',
+      permissions: '["$authenticated","requests.read","requests.create","requests.delete"]',
       isDefault: true,
       isSystem: true,
       position: 1,

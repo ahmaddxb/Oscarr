@@ -23,7 +23,6 @@ export function FeaturesTab() {
   const [loadError, setLoadError] = useState(false);
   const [autoApproveRequests, setAutoApproveRequests] = useState(false);
   const [requestsEnabled, setRequestsEnabled] = useState(true);
-  const [supportEnabled, setSupportEnabled] = useState(true);
   const [calendarEnabled, setCalendarEnabled] = useState(true);
   const [nsfwBlurEnabled, setNsfwBlurEnabled] = useState(true);
   const [missingSearchCooldownMin, setMissingSearchCooldownMin] = useState(60);
@@ -41,7 +40,6 @@ export function FeaturesTab() {
       const vals = {
         autoApproveRequests: data.autoApproveRequests ?? false,
         requestsEnabled: data.requestsEnabled ?? true,
-        supportEnabled: data.supportEnabled ?? true,
         calendarEnabled: data.calendarEnabled ?? true,
         nsfwBlurEnabled: data.nsfwBlurEnabled ?? true,
         missingSearchCooldownMin: data.missingSearchCooldownMin ?? 60,
@@ -49,7 +47,6 @@ export function FeaturesTab() {
       };
       setAutoApproveRequests(vals.autoApproveRequests);
       setRequestsEnabled(vals.requestsEnabled);
-      setSupportEnabled(vals.supportEnabled);
       setCalendarEnabled(vals.calendarEnabled);
       setNsfwBlurEnabled(vals.nsfwBlurEnabled);
       setMissingSearchCooldownMin(vals.missingSearchCooldownMin);
@@ -66,8 +63,8 @@ export function FeaturesTab() {
   useEffect(() => { loadAll(); }, [loadAll]);
 
   const currentValues = useMemo(
-    () => ({ autoApproveRequests, requestsEnabled, supportEnabled, calendarEnabled, nsfwBlurEnabled, missingSearchCooldownMin, disabledLoginMode }),
-    [autoApproveRequests, requestsEnabled, supportEnabled, calendarEnabled, nsfwBlurEnabled, missingSearchCooldownMin, disabledLoginMode]
+    () => ({ autoApproveRequests, requestsEnabled, calendarEnabled, nsfwBlurEnabled, missingSearchCooldownMin, disabledLoginMode }),
+    [autoApproveRequests, requestsEnabled, calendarEnabled, nsfwBlurEnabled, missingSearchCooldownMin, disabledLoginMode]
   );
 
   const hasChanges = !loading && Object.keys(initialValues.current).length > 0 &&
@@ -77,7 +74,6 @@ export function FeaturesTab() {
     const iv = initialValues.current;
     setAutoApproveRequests(iv.autoApproveRequests as boolean);
     setRequestsEnabled(iv.requestsEnabled as boolean);
-    setSupportEnabled(iv.supportEnabled as boolean);
     setCalendarEnabled(iv.calendarEnabled as boolean);
     setNsfwBlurEnabled(iv.nsfwBlurEnabled as boolean);
     setMissingSearchCooldownMin(iv.missingSearchCooldownMin as number);
@@ -90,7 +86,6 @@ export function FeaturesTab() {
       await api.put('/admin/settings', {
         autoApproveRequests,
         requestsEnabled,
-        supportEnabled,
         calendarEnabled,
         nsfwBlurEnabled,
         missingSearchCooldownMin,
@@ -127,7 +122,6 @@ export function FeaturesTab() {
   const features = [
     { label: t('admin.features.requests'), desc: t('admin.features.requests_desc'), value: requestsEnabled, set: setRequestsEnabled },
     { label: t('admin.features.auto_approve'), desc: t('admin.features.auto_approve_desc'), value: autoApproveRequests, set: setAutoApproveRequests },
-    { label: t('admin.features.support'), desc: t('admin.features.support_desc'), value: supportEnabled, set: setSupportEnabled },
     { label: t('admin.features.calendar'), desc: t('admin.features.calendar_desc'), value: calendarEnabled, set: setCalendarEnabled },
     { label: t('admin.features.nsfw_blur'), desc: t('admin.features.nsfw_blur_desc'), value: nsfwBlurEnabled, set: setNsfwBlurEnabled },
   ];

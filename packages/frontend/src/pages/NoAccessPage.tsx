@@ -32,7 +32,7 @@ export default function NoAccessPage() {
           {t('noAccess.support_help')}
         </p>
 
-        <Link to="/support" className="btn-primary inline-flex items-center gap-2">
+        <Link to="/p/arediss__oscarr-plugin-support" className="btn-primary inline-flex items-center gap-2">
           <MessageSquare className="w-4 h-4" />
           {t('noAccess.contact_support')}
         </Link>

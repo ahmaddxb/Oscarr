@@ -13,7 +13,6 @@ export interface CustomLink {
 
 interface Features {
   requestsEnabled: boolean;
-  supportEnabled: boolean;
   calendarEnabled: boolean;
   siteName: string;
   instanceLanguage?: string;
@@ -29,7 +28,6 @@ interface FeaturesContextType {
 
 const defaultFeatures: Features = {
   requestsEnabled: true,
-  supportEnabled: true,
   calendarEnabled: true,
   siteName: 'Oscarr',
 };

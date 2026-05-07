@@ -88,7 +88,6 @@ export async function settingsRoutes(app: FastifyInstance) {
           missingSearchCooldownMin: { type: 'number', description: 'Cooldown in minutes before allowing another missing search' },
           requestsEnabled: { type: 'boolean', description: 'Enable the request system' },
           nsfwBlurEnabled: { type: 'boolean', description: 'Enable NSFW content blur' },
-          supportEnabled: { type: 'boolean', description: 'Enable the support/ticket system' },
           calendarEnabled: { type: 'boolean', description: 'Enable the calendar feature' },
           siteName: { type: 'string', description: 'Custom site name' },
           siteUrl: { type: 'string', description: 'Public URL of the instance for notification links' },
@@ -110,7 +109,6 @@ export async function settingsRoutes(app: FastifyInstance) {
       missingSearchCooldownMin?: number;
       requestsEnabled?: boolean;
       nsfwBlurEnabled?: boolean;
-      supportEnabled?: boolean;
       calendarEnabled?: boolean;
       siteName?: string;
       siteUrl?: string;
@@ -131,7 +129,6 @@ export async function settingsRoutes(app: FastifyInstance) {
         missingSearchCooldownMin: body.missingSearchCooldownMin ?? undefined,
         requestsEnabled: body.requestsEnabled ?? undefined,
         nsfwBlurEnabled: body.nsfwBlurEnabled ?? undefined,
-        supportEnabled: body.supportEnabled ?? undefined,
         calendarEnabled: body.calendarEnabled ?? undefined,
         siteName: body.siteName ?? undefined,
         siteUrl: body.siteUrl !== undefined ? (body.siteUrl?.trim() || null) : undefined,
@@ -149,7 +146,6 @@ export async function settingsRoutes(app: FastifyInstance) {
         autoApproveRequests: body.autoApproveRequests,
         missingSearchCooldownMin: body.missingSearchCooldownMin,
         requestsEnabled: body.requestsEnabled,
-        supportEnabled: body.supportEnabled,
         calendarEnabled: body.calendarEnabled,
         siteName: body.siteName,
         instanceLanguages: body.instanceLanguages ? JSON.stringify(body.instanceLanguages) : undefined,

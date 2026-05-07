@@ -13,7 +13,6 @@ import SearchPage from '@/pages/SearchPage';
 import MediaDetailPage from '@/pages/MediaDetailPage';
 import PersonPage from '@/pages/PersonPage';
 import RequestsPage from '@/pages/RequestsPage';
-import MessagesPage from '@/pages/MessagesPage';
 
 const AdminPage = lazy(() => import('@/pages/AdminPage'));
 const AdminLayout = lazy(() => import('@/components/layouts/AdminLayout'));
@@ -119,7 +118,6 @@ export default function App() {
                   <Route path="/discover/:mediaType/genre/:genreId" element={<RequireAccess><DiscoverGenrePage /></RequireAccess>} />
                   <Route path="/category/:slug" element={<RequireAccess><CategoryPage /></RequireAccess>} />
                   <Route path="/calendar" element={<RequireFeature feature="calendarEnabled"><RequireAccess><CalendarPage /></RequireAccess></RequireFeature>} />
-                  <Route path="/support" element={<RequireFeature feature="supportEnabled"><MessagesPage /></RequireFeature>} />
                   <Route path="/p/:pluginId/*" element={<PluginPage />} />
                   <Route path="/install" element={<Navigate to="/" replace />} />
                 </Routes>

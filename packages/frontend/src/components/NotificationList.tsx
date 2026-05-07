@@ -60,7 +60,9 @@ function getNotifAction(notif: UserNotification): NotifAction | null {
     }
   }
   if (notif.type === 'support_reply') {
-    return { href: '/support', labelKey: 'notifications.action.reply', fallback: 'Répondre', icon: 'reply' };
+    // Support module shipped as a plugin since 0.8 — Oscarr-Plugin-Support owns this notif
+    // type via ctx.sendUserNotification. Route stays generic on the plugin's `/p/<id>` URL.
+    return { href: '/p/arediss__oscarr-plugin-support', labelKey: 'notifications.action.reply', fallback: 'Répondre', icon: 'reply' };
   }
   return null;
 }

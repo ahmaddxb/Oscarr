@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, X as XIcon, Eye, EyeOff, Home, Search, Film, MessageSquare, Calendar, Menu, X, Shield, Sparkles, Bell, ChevronLeft, CheckCheck } from 'lucide-react';
+import { AlertTriangle, X as XIcon, Eye, EyeOff, Home, Search, Film, Calendar, Menu, X, Shield, Sparkles, Bell, ChevronLeft, CheckCheck } from 'lucide-react';
 import api from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
@@ -23,7 +23,6 @@ const ALL_NAV = [
   { path: '/', labelKey: 'nav.home', icon: Home, feature: null },
   { path: '/requests', labelKey: 'nav.requests', icon: Film, feature: 'requestsEnabled' as const },
   { path: '/calendar', labelKey: 'nav.calendar', icon: Calendar, feature: 'calendarEnabled' as const },
-  { path: '/support', labelKey: 'nav.support', icon: MessageSquare, feature: 'supportEnabled' as const },
 ];
 
 export default function Layout({ children }: Readonly<{ children: React.ReactNode }>) {

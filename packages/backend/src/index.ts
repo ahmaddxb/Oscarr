@@ -14,6 +14,7 @@ import { registerPlugins } from './bootstrap/plugins.js';
 import { registerStatic } from './bootstrap/static.js';
 import { initNotifications, startScheduler } from './bootstrap/jobs.js';
 import { refreshVerboseRequestLogFlag, registerVerboseRequestLog } from './utils/verboseRequestLog.js';
+import { runLegacySupportExport } from './services/supportLegacyExport.js';
 
 // Process-level guards: log the error to AppLog (so an admin can share it from the Logs tab)
 // then exit hard — a process that's already thrown an unhandled exception is in undefined state
@@ -72,6 +73,8 @@ async function ensureMigrated() {
 
 async function start() {
   loadInstallState();
+  // Export legacy SupportTicket/TicketMessage rows before the drop migration removes them.
+  runLegacySupportExport();
   await ensureMigrated();
   await refreshVerboseRequestLogFlag();
   await registerSecurity(app);

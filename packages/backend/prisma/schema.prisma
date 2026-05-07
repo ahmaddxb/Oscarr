@@ -23,8 +23,6 @@ model User {
   providers             UserProvider[]
   requests              MediaRequest[]
   approvedRequests      MediaRequest[] @relation("ApprovedBy")
-  supportTickets        SupportTicket[]
-  ticketMessages        TicketMessage[]
   notifications         UserNotification[]
   blacklistedMedia      BlacklistedMedia[] @relation("BlacklistCreatedBy")
   pushSubscriptions     PushSubscription[]
@@ -142,29 +140,6 @@ model MediaRequest {
   @@index([status])
 }
 
-model SupportTicket {
-  id            Int       @id @default(autoincrement())
-  userId        Int
-  subject       String
-  status        String    @default("open") // "open" | "closed"
-  createdAt     DateTime  @default(now())
-  closedAt      DateTime?
-
-  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages      TicketMessage[]
-}
-
-model TicketMessage {
-  id            Int       @id @default(autoincrement())
-  ticketId      Int
-  userId        Int
-  content       String
-  createdAt     DateTime  @default(now())
-
-  ticket        SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
 model AppSettings {
   id                    Int       @id @default(1)
   defaultQualityProfile Int?      // Quality profile ID from Radarr/Sonarr
@@ -180,7 +155,6 @@ model AppSettings {
   disabledLoginMode     String    @default("friendly") // "block" | "friendly" — how to reject login for User.disabled=true
   autoApproveRequests   Boolean   @default(false)
   requestsEnabled       Boolean   @default(true)
-  supportEnabled        Boolean   @default(true)
   calendarEnabled       Boolean   @default(true)
   siteName              String    @default("Oscarr")
   registrationEnabled   Boolean   @default(true)

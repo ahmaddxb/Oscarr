@@ -148,7 +148,6 @@ export async function appRoutes(app: FastifyInstance) {
     } catch { /* malformed JSON in DB → empty list */ }
     return {
       requestsEnabled: settings?.requestsEnabled ?? true,
-      supportEnabled: settings?.supportEnabled ?? true,
       calendarEnabled: settings?.calendarEnabled ?? true,
       siteName: settings?.siteName ?? 'Oscarr',
       nsfwBlurEnabled: settings?.nsfwBlurEnabled ?? true,

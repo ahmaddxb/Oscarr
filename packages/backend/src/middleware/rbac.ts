@@ -119,13 +119,6 @@ const ROUTE_PERMISSIONS: Record<string, RouteRule> = {
   'GET:/api/app/homepage-layout':        { permission: PUBLIC },
   'GET:/api/app/vapid-key':              { permission: PUBLIC },
 
-  // ── Support ──
-  'GET:/api/support/tickets':                   { permission: 'support.read', ownerScoped: true },
-  'POST:/api/support/tickets':                  { permission: 'support.create' },
-  'GET:/api/support/tickets/:id/messages':      { permission: 'support.read', ownerScoped: true },
-  'POST:/api/support/tickets/:id/messages':     { permission: 'support.write', ownerScoped: true },
-  'PATCH:/api/support/tickets/:id':             { permission: 'support.manage' },
-
   // ── Notifications (always own) ──
   'GET:/api/notifications/':             { permission: AUTH },
   'GET:/api/notifications/unread-count': { permission: AUTH },
@@ -193,7 +186,7 @@ let roleCacheReady = false;
 // Fallback used before DB is available (app boot)
 const FALLBACK_ROLES: Record<string, string[]> = {
   admin: ['*'],
-  user: [AUTH, 'requests.read', 'requests.create', 'requests.delete', 'support.read', 'support.create', 'support.write'],
+  user: [AUTH, 'requests.read', 'requests.create', 'requests.delete'],
 };
 
 async function loadRolesFromDb(): Promise<void> {
@@ -234,10 +227,6 @@ const PERMISSION_DESCRIPTIONS: Record<string, string> = {
   'requests.delete':   'Delete own media requests',
   'requests.approve':  'Approve pending requests',
   'requests.decline':  'Decline pending requests',
-  'support.read':      'View support tickets',
-  'support.create':    'Create support tickets',
-  'support.write':     'Reply to support tickets',
-  'support.manage':    'Close and reopen support tickets',
   'admin.danger':      'Execute bulk cleanup and dangerous data operations',
 };
 
