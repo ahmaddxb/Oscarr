@@ -41,6 +41,17 @@ export interface SeerrUser {
   updatedAt: string;
   requestCount: number;
   displayName: string;
+  /** Mirrors Overseerr's nested `user.settings` payload. The only field most third-party
+   *  clients read here is `discordId` (Doplarr maps the Discord caller -> Seerr user via it),
+   *  so we keep the rest defaulted to null/empty. */
+  settings: {
+    discordId: string | null;
+    telegramChatId: string | null;
+    telegramSendSilently: boolean;
+    region: string;
+    originalLanguage: string;
+    locale: string;
+  };
 }
 
 export interface AdaptUserInput {
@@ -51,6 +62,7 @@ export interface AdaptUserInput {
 export function buildSeerrUser({ user, requestCount }: AdaptUserInput): SeerrUser {
   const isAdmin = user.role === 'admin';
   const plexLink = user.providers.find((p) => p.provider === 'plex');
+  const discordLink = user.providers.find((p) => p.provider === 'discord');
   const userType = plexLink ? SEERR_USER_TYPE.PLEX : SEERR_USER_TYPE.LOCAL;
 
   // Admin gets ADMIN | MANAGE_REQUESTS | REQUEST | AUTO_APPROVE; non-admin gets REQUEST only.
@@ -79,5 +91,13 @@ export function buildSeerrUser({ user, requestCount }: AdaptUserInput): SeerrUse
     updatedAt: user.updatedAt.toISOString(),
     requestCount,
     displayName: user.displayName ?? user.email,
+    settings: {
+      discordId: discordLink?.providerId ?? null,
+      telegramChatId: null,
+      telegramSendSilently: false,
+      region: '',
+      originalLanguage: '',
+      locale: 'en',
+    },
   };
 }
