@@ -3,7 +3,9 @@ import { startPlexPinFlow, type PlexPinFlowHandle } from '@/providers/plex/pinFl
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Combobox, ComboboxButton, ComboboxInput, ComboboxOption, ComboboxOptions } from '@headlessui/react';
-import { Check, ChevronsUpDown, Eye, EyeOff, Loader2, Plug, RefreshCw, Save, KeyRound } from 'lucide-react';
+import { Check, ChevronsUpDown, Copy, Eye, EyeOff, Loader2, Plug, RefreshCw, Save } from 'lucide-react';
+import { AdminPasswordModal } from '@/components/AdminPasswordModal';
+import { copyToClipboard } from '@/utils/clipboard';
 import api from '@/lib/api';
 import { toastApiError, showToast } from '@/utils/toast';
 import { useServiceSchemas, type ServiceData } from '@/hooks/useServiceSchemas';
@@ -51,40 +53,54 @@ export function ServiceModal({ service, onClose, onSaved }: ServiceModalProps) {
     setConfig((prev) => ({ ...prev, [key]: value }));
   };
 
-  const promptPassword = (): string | null => {
-    const pwd = globalThis.prompt(t('admin.services.reveal_password_prompt'));
-    return pwd && pwd.length > 0 ? pwd : null;
+  // Secret-revealing actions go through AdminPasswordModal — `pwdPrompt` tracks which field we
+  // were about to act on, the modal collects the admin password, and onSubmit dispatches based
+  // on `kind`. Replaces the legacy `globalThis.prompt()` flow which leaked the prompt as a
+  // browser-native dialog and could not be styled or made accessible.
+  const [pwdPrompt, setPwdPrompt] = useState<{ kind: 'reveal' | 'copy'; fieldKey: string } | null>(null);
+
+  // Re-mask a revealed secret after AUTO_REMASK_MS so a momentarily exposed credential doesn't
+  // sit on screen indefinitely. Cleared if the user closes the modal in between.
+  const AUTO_REMASK_MS = 8_000;
+  const remaskTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  useEffect(() => () => {
+    Object.values(remaskTimers.current).forEach((id) => clearTimeout(id));
+  }, []);
+
+  const scheduleRemask = (key: string) => {
+    if (remaskTimers.current[key]) clearTimeout(remaskTimers.current[key]);
+    remaskTimers.current[key] = setTimeout(() => {
+      setShowSecrets((prev) => ({ ...prev, [key]: false }));
+      // Restore the placeholder value so the input visually re-masks instead of showing the
+      // plain value as obscured dots.
+      handleConfigChange(key, MASK);
+      delete remaskTimers.current[key];
+    }, AUTO_REMASK_MS);
   };
 
-  const revealSecret = async (key: string) => {
-    if (!service) return;
-    const password = promptPassword();
-    if (!password) return;
+  const handlePwdSubmit = async (password: string): Promise<boolean> => {
+    if (!service || !pwdPrompt) return false;
+    const { kind, fieldKey } = pwdPrompt;
     try {
       const { data } = await api.post(`/admin/services/${service.id}/config/reveal`, { password });
-      const value = data?.config?.[key];
-      if (typeof value === 'string') {
-        handleConfigChange(key, value);
-        setShowSecrets((prev) => ({ ...prev, [key]: true }));
-      }
-    } catch (err) {
-      toastApiError(err, t('admin.services.reveal_failed'));
-    }
-  };
+      const value = data?.config?.[fieldKey];
+      if (typeof value !== 'string') return false;
 
-  const copySecret = async (key: string) => {
-    if (!service) return;
-    const password = promptPassword();
-    if (!password) return;
-    try {
-      const { data } = await api.post(`/admin/services/${service.id}/config/reveal`, { password });
-      const value = data?.config?.[key];
-      if (typeof value === 'string') {
-        await navigator.clipboard.writeText(value);
-        showToast(t('common.copied'), 'success');
+      if (kind === 'reveal') {
+        handleConfigChange(fieldKey, value);
+        setShowSecrets((prev) => ({ ...prev, [fieldKey]: true }));
+        scheduleRemask(fieldKey);
+      } else {
+        const ok = await copyToClipboard(value);
+        if (ok) showToast(t('common.copied'), 'success');
+        else showToast(t('admin.services.copy_failed'), 'error');
       }
+      return true;
     } catch (err) {
-      toastApiError(err, t('admin.services.reveal_failed'));
+      // Fall through — the modal stays open with an inline "invalid" hint. We still log so a
+      // server-side outage doesn't masquerade as a bad password.
+      console.warn('[reveal] failed', err);
+      return false;
     }
   };
 
@@ -250,22 +266,22 @@ export function ServiceModal({ service, onClose, onSaved }: ServiceModalProps) {
                 />
                 {field.type === 'password' && (
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                    {isEdit && (
+                    {isEdit && isMasked && (
                       <button
                         type="button"
-                        onClick={() => copySecret(field.key)}
+                        onClick={() => setPwdPrompt({ kind: 'copy', fieldKey: field.key })}
                         className="p-1 text-ndp-text-dim hover:text-ndp-text"
                         title={t('common.copy')}
                         aria-label={t('common.copy')}
                       >
-                        <KeyRound className="w-4 h-4" />
+                        <Copy className="w-4 h-4" />
                       </button>
                     )}
                     <button
                       type="button"
                       onClick={() => {
                         if (isMasked) {
-                          revealSecret(field.key);
+                          setPwdPrompt({ kind: 'reveal', fieldKey: field.key });
                         } else {
                           setShowSecrets((prev) => ({ ...prev, [field.key]: !prev[field.key] }));
                         }
@@ -322,6 +338,13 @@ export function ServiceModal({ service, onClose, onSaved }: ServiceModalProps) {
             </button>
           </div>
         </form>
+        <AdminPasswordModal
+          open={pwdPrompt !== null}
+          title={t(pwdPrompt?.kind === 'copy' ? 'admin.services.confirm_copy_title' : 'admin.services.confirm_reveal_title')}
+          description={t(pwdPrompt?.kind === 'copy' ? 'admin.services.confirm_copy_desc' : 'admin.services.confirm_reveal_desc')}
+          onSubmit={handlePwdSubmit}
+          onClose={() => setPwdPrompt(null)}
+        />
       </div>
     </div>,
     document.body,
