@@ -792,7 +792,7 @@
   "admin.plugins.update.new_permissions": "Nouvelles permissions demandées",
   "admin.plugins.update.removed_permissions": "Permissions retirées",
   "admin.plugins.update.changed_reasons": "Justifications de capability modifiées",
-  "admin.plugins.update.no_permission_changes": "Aucun changement de permissions — surface identique à la version installée.",
+  "admin.plugins.update.no_permission_changes": "Aucune modification des autorisations par rapport à la version installée.",
   "plugin.not_found": "Plugin introuvable",
   "plugin.frontend_unavailable": "Plugin \"{{pluginId}}\" — frontend non disponible",
   "plugin.no_settings": "Ce plugin n'a pas de paramètres configurables.",

@@ -792,7 +792,7 @@
   "admin.plugins.update.new_permissions": "New permissions requested",
   "admin.plugins.update.removed_permissions": "Permissions removed",
   "admin.plugins.update.changed_reasons": "Capability reasons changed",
-  "admin.plugins.update.no_permission_changes": "No permission changes — same surface as the installed version.",
+  "admin.plugins.update.no_permission_changes": "No permission changes compared to the installed version.",
   "plugin.not_found": "Plugin not found",
   "plugin.frontend_unavailable": "Plugin \"{{pluginId}}\" — frontend not available",
   "plugin.no_settings": "This plugin has no configurable settings.",
