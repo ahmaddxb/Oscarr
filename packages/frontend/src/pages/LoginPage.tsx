@@ -3,11 +3,15 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/context/AuthContext';
 import { useFeatures } from '@/context/FeaturesContext';
-import { Film, Mail, Eye, EyeOff } from 'lucide-react';
-import api from '@/lib/api';
+import { Mail, Eye, EyeOff } from 'lucide-react';
+import api, { backdropUrl } from '@/lib/api';
 import type { AuthProviderConfig } from '@/types';
 import { getProviderButtonClass } from '@/providers/colors';
 import { startPlexPinFlow, type PlexPinFlowHandle } from '@/providers/plex/pinFlow';
+
+const HERO_POOL_SIZE = 10;
+
+interface HeroBackdrop { backdrop_path: string | null; title?: string; name?: string; }
 
 /** Validates a `?next=` query param. Returns the safe destination, or `null` if the value
  *  is missing, malformed, or points to a foreign origin (open-redirect protection).
@@ -52,9 +56,21 @@ export default function LoginPage() {
   const [polling, setPolling] = useState(false);
   const flowRef = useRef<PlexPinFlowHandle | null>(null);
 
+  const [hero, setHero] = useState<HeroBackdrop | null>(null);
+
   useEffect(() => {
     api.get('/auth/providers').then(({ data }) => setProviders(data)).catch((err) => console.warn('[LoginPage] /auth/providers failed', err));
     return () => flowRef.current?.cancel();
+  }, []);
+
+  useEffect(() => {
+    api.get<{ results?: HeroBackdrop[] }>('/tmdb/trending')
+      .then(({ data }) => {
+        const pool = (data?.results ?? []).filter((m) => m.backdrop_path).slice(0, HERO_POOL_SIZE);
+        if (pool.length === 0) return;
+        setHero(pool[Math.floor(Math.random() * pool.length)]);
+      })
+      .catch((err) => console.warn('[LoginPage] /tmdb/trending failed', err));
   }, []);
 
   // OAuth providers redirect back to `/login?error=<TOKEN>` on failure (see Discord callback).
@@ -214,6 +230,15 @@ export default function LoginPage() {
   return (
     <div className="min-h-dvh bg-ndp-bg flex items-center justify-center relative overflow-hidden">
       <div className="absolute inset-0">
+        {hero?.backdrop_path && (
+          <img
+            src={backdropUrl(hero.backdrop_path)}
+            alt=""
+            aria-hidden
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+        )}
+        <div className="absolute inset-0 bg-ndp-bg/70 backdrop-blur-sm" />
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-ndp-accent/10 rounded-full blur-3xl" />
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl" />
       </div>
@@ -222,9 +247,6 @@ export default function LoginPage() {
         <div className="card p-8 shadow-2xl shadow-black/50">
           {/* Logo */}
           <div className="flex flex-col items-center mb-8">
-            <div className="w-16 h-16 bg-gradient-to-br from-ndp-accent to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-ndp-accent/30 mb-4">
-              <Film className="w-8 h-8 text-white" />
-            </div>
             <h1 className="text-2xl font-bold text-ndp-text">{features.siteName}</h1>
             <p className="text-ndp-text-muted text-sm mt-1">
               {mode === 'register' ? t('register.title') : t('login.title')}

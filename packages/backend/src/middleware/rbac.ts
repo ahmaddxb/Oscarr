@@ -60,7 +60,7 @@ const ROUTE_PERMISSIONS: Record<string, RouteRule> = {
   'POST:/api/auth/logout':               { permission: AUTH },
 
   // ── TMDB (any user) ──
-  'GET:/api/tmdb/trending':                            { permission: AUTH },
+  'GET:/api/tmdb/trending':                            { permission: PUBLIC },
   'GET:/api/tmdb/movies/popular':                      { permission: AUTH },
   'GET:/api/tmdb/tv/popular':                          { permission: AUTH },
   'GET:/api/tmdb/tv/trending-anime':                   { permission: AUTH },
