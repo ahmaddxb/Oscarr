@@ -518,14 +518,15 @@ export async function pluginRoutes(app: FastifyInstance) {
   // Stitches the registry doc (curated list) with each entry's manifest + GitHub repo
   // metadata + release download counts to produce the catalog the admin sees on the
   // Discover tab. Cached 30 min — same TTL as the registry doc itself.
-  app.get('/registry', async (request, reply) => {
+  app.get<{ Querystring: { force?: string } }>('/registry', async (request, reply) => {
     try {
+      const force = request.query.force === 'true';
       const now = Date.now();
-      if (catalogCache && now - catalogCache.timestamp < CATALOG_TTL_MS) {
+      if (!force && catalogCache && now - catalogCache.timestamp < CATALOG_TTL_MS) {
         return catalogCache.data;
       }
 
-      const registry = await fetchRegistry();
+      const registry = await fetchRegistry(force);
       const validRepo = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
       const validEntries = (registry.plugins ?? []).filter((entry: RegistryEntry) => {
         if (!validRepo.test(entry.repository)) {
@@ -543,7 +544,7 @@ export async function pluginRoutes(app: FastifyInstance) {
 
           let downloads = 0;
           try {
-            const rel = await fetchLatestRelease(entry.repository);
+            const rel = await fetchLatestRelease(entry.repository, force);
             for (const a of rel?.assets ?? []) {
               if (/\.tar\.gz$/i.test(a.name) && !/\.sha256$/i.test(a.name)) {
                 downloads += a.download_count ?? 0;

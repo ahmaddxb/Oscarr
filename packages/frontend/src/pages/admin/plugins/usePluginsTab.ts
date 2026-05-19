@@ -39,10 +39,10 @@ export function usePluginsTab() {
       .finally(() => setLoading(false));
   }, [t]);
 
-  const fetchRegistry = useCallback(() => {
+  const fetchRegistry = useCallback((force = false) => {
     setRegistryLoading(true);
     setRegistryError(null);
-    return api.get('/plugins/registry')
+    return api.get('/plugins/registry', { params: force ? { force: 'true' } : undefined })
       .then(({ data }) => setRegistry(data))
       .catch(() => setRegistryError('Failed to load plugin registry'))
       .finally(() => setRegistryLoading(false));
@@ -60,11 +60,16 @@ export function usePluginsTab() {
     api.get('/plugins/updates').then(() => fetchPlugins()).catch(() => { /* best-effort */ });
   }, [fetchPlugins]);
 
-  /** Force-refresh: bypass the 15 min TTL + per-repo release cache. Wired to the Reload button. */
+  /** Force-refresh: bypass the 15 min TTL + per-repo release cache. Wired to the Reload button.
+   *  Also force-refreshes the Discover catalog so new registry entries (or new releases of
+   *  already-listed plugins) show up immediately instead of waiting for the 30 min TTL. */
   const refreshUpdates = useCallback(async () => {
     setRefreshing(true);
     try {
-      await api.get('/plugins/updates', { params: { force: 'true' } });
+      await Promise.all([
+        api.get('/plugins/updates', { params: { force: 'true' } }),
+        fetchRegistry(true),
+      ]);
       await fetchPlugins();
       refreshPluginUpdatesCount();
     } catch (err) {
@@ -72,7 +77,7 @@ export function usePluginsTab() {
     } finally {
       setRefreshing(false);
     }
-  }, [fetchPlugins, t]);
+  }, [fetchPlugins, fetchRegistry, t]);
 
   const applyUpdate = useCallback(async (id: string): Promise<boolean> => {
     setUpdating(id);
