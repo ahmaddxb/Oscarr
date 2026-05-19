@@ -166,6 +166,10 @@ export interface ServiceDefinition {
    *  Surfaces an "Untested" pill in the picker and a feedback banner once selected, so users
    *  know to report back. Removed in the same commit that confirms the integration works. */
   untested?: boolean;
+  /** Flag this connector as part of the install-wizard's required set. The wizard then
+   *  enforces that at least one OK service exists for every category that contains at least
+   *  one `requiredForInstall: true` provider before allowing the user to proceed. */
+  requiredForInstall?: boolean;
   test(config: Record<string, string>): Promise<{ ok: boolean; version?: string }>;
   createClient?(config: Record<string, string>): ArrClient;
 }

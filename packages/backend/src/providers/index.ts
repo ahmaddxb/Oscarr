@@ -62,6 +62,7 @@ export function getServiceSchemas() {
     category: p.service.category,
     fields: p.service.fields,
     untested: p.service.untested ?? false,
+    requiredForInstall: p.service.requiredForInstall ?? false,
   }));
 }
 

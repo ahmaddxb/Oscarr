@@ -156,9 +156,13 @@ export function InstalledList({
             <div className="flex items-center justify-between pt-3 border-t border-white/5">
               <button
                 onClick={() => onToggle(plugin)}
-                disabled={toggling === plugin.id}
-                className="flex items-center gap-2.5 text-xs font-medium text-ndp-text-dim hover:text-ndp-text transition-colors disabled:opacity-70"
-                title={plugin.enabled ? 'Disable' : 'Enable'}
+                disabled={toggling === plugin.id || plugin.compat?.status === 'incompatible' || !!plugin.error}
+                className="flex items-center gap-2.5 text-xs font-medium text-ndp-text-dim hover:text-ndp-text transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title={
+                  plugin.compat?.status === 'incompatible' ? (plugin.compat.reason || 'Incompatible with this Oscarr version')
+                  : plugin.error ? `Failed to load: ${plugin.error}`
+                  : plugin.enabled ? 'Disable' : 'Enable'
+                }
               >
                 {toggling === plugin.id ? (
                   <span className="inline-flex h-5 w-9 items-center justify-center">

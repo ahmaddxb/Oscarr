@@ -235,6 +235,7 @@ export const plexProvider: Provider = {
     label: 'Plex',
     icon: '/providers/plex.svg',
     category: 'media-server',
+    requiredForInstall: true,
     fields: [
       { key: 'url', labelKey: 'common.url', type: 'text', placeholder: 'http://localhost:32400' },
       { key: 'token', labelKey: 'common.token', type: 'password', helper: 'plex-oauth' },

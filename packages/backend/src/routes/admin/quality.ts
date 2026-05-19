@@ -117,6 +117,70 @@ export async function qualityRoutes(app: FastifyInstance) {
     return { created };
   });
 
+  // Auto-map every available Radarr/Sonarr quality profile to one of the seeded Oscarr
+  // tiers based on a simple name-matching heuristic. Idempotent — skips mappings that
+  // already exist (same option/service/profile triplet). Used by the install wizard's
+  // Defaults step to close the loop after seeding the quality tiers.
+  app.post('/quality-mappings/auto', async (_request, reply) => {
+    const { createArrClient } = await import('../../providers/index.js');
+    const { parseServiceConfig } = await import('../../utils/services.js');
+
+    const options = await prisma.qualityOption.findMany();
+    if (options.length === 0) return { created: 0, scanned: 0, note: 'No quality options to map against — seed them first.' };
+    const services = await prisma.service.findMany({
+      where: { type: { in: ['radarr', 'sonarr'] }, enabled: true },
+    });
+
+    const labelMap = new Map<string, number>();
+    for (const o of options) labelMap.set(o.label.toLowerCase(), o.id);
+
+    /** Best-effort match from a Radarr/Sonarr profile name to one of the seeded tier labels.
+     *  Order matters — check the most specific patterns first (HDR before plain 4K, UHD
+     *  before HD). Unmatched profiles are skipped; the user can map them manually after. */
+    function pickTier(profileName: string): number | undefined {
+      const n = profileName.toLowerCase();
+      if ((/4k|2160|uhd/.test(n)) && /hdr/.test(n)) return labelMap.get('4k hdr');
+      if (/4k|2160|uhd/.test(n)) return labelMap.get('4k');
+      if (/1080|720|hd/.test(n)) return labelMap.get('hd');
+      if (/480|360|sd/.test(n)) return labelMap.get('sd');
+      return undefined;
+    }
+
+    let created = 0;
+    let scanned = 0;
+    const failedServices: string[] = [];
+    for (const svc of services) {
+      let profiles: { id: number; name: string }[] = [];
+      try {
+        const config = parseServiceConfig(svc.config);
+        const client = createArrClient(svc.type, config);
+        profiles = await client.getQualityProfiles();
+      } catch {
+        failedServices.push(svc.name);
+        continue;
+      }
+      for (const profile of profiles) {
+        scanned++;
+        const tierId = pickTier(profile.name);
+        if (!tierId) continue;
+        const exists = await prisma.qualityMapping.findFirst({
+          where: { qualityOptionId: tierId, serviceId: svc.id, qualityProfileId: profile.id },
+        });
+        if (exists) continue;
+        await prisma.qualityMapping.create({
+          data: {
+            qualityOptionId: tierId,
+            serviceId: svc.id,
+            qualityProfileId: profile.id,
+            qualityProfileName: profile.name,
+          },
+        });
+        created++;
+      }
+    }
+    return reply.send({ created, scanned, failedServices });
+  });
+
   // === QUALITY MAPPINGS ===
 
   app.get('/quality-mappings', async (request, reply) => {

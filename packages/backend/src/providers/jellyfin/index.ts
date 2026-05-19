@@ -221,6 +221,7 @@ export const jellyfinProvider: Provider = {
     label: 'Jellyfin',
     icon: '/providers/jellyfin.svg',
     category: 'media-server',
+    requiredForInstall: true,
     fields: [
       { key: 'url', labelKey: 'common.url', type: 'text', placeholder: 'http://localhost:8096' },
       { key: 'apiKey', labelKey: 'common.api_key', type: 'password' },

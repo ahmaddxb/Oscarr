@@ -206,9 +206,11 @@ export async function setupRoutes(app: FastifyInstance) {
       await initScheduler();
       markInstalled();
       logEvent('info', 'Setup', 'First full sync completed');
-      // Restart so setup routes are physically unmounted (supervisor/docker will respawn).
-      setTimeout(() => process.exit(0), 500);
-      return { ok: true, result, restarting: true };
+      // No process exit — the setup preHandler now 403s every /setup/* call once
+      // `isInstalled()` flips, so the routes are effectively dead in place. Avoids
+      // requiring an external supervisor (docker --restart, systemd, …) just to
+      // come back online after install.
+      return { ok: true, result };
     } catch (err) {
       return reply.status(500).send({ error: 'Sync failed', details: String(err) });
     }

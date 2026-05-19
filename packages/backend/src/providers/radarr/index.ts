@@ -8,6 +8,7 @@ export const radarrProvider: Provider = {
     label: 'Radarr',
     icon: '/providers/radarr.svg',
     category: 'arr',
+    requiredForInstall: true,
     handlesMediaTypes: ['movie'],
     fields: [
       { key: 'url', labelKey: 'common.url', type: 'text', placeholder: 'http://localhost:7878' },

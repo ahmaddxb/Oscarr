@@ -16,6 +16,7 @@ export interface ServiceSchema {
   category: 'arr' | 'media-server' | 'download-client' | 'indexer' | 'monitoring';
   fields: ServiceField[];
   untested?: boolean;
+  requiredForInstall?: boolean;
 }
 
 export interface ServiceData {

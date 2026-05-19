@@ -438,6 +438,18 @@ export class PluginEngine {
     const plugin = this.plugins.get(id);
     if (!plugin) throw new Error(`Plugin "${id}" not found`);
 
+    // Refuse to toggle a plugin that never loaded — the registration is a stub (load
+    // failed at import or compat check), so there is no real handler to run and the
+    // PluginState row was never upserted. Without this guard the downstream
+    // prisma.pluginState.update() throws "record not found" with a misleading stacktrace.
+    if (plugin.error) {
+      const compat = this.compatCache.get(id);
+      const reason = compat?.status === 'incompatible'
+        ? `Plugin "${id}" is incompatible with this Oscarr version: ${compat.reason}`
+        : `Plugin "${id}" failed to load — fix the error before enabling: ${plugin.error}`;
+      throw new Error(reason);
+    }
+
     // Call lifecycle hook before persisting (best-effort, don't block toggle)
     try {
       if (enabled && plugin.registration.onEnable) {
