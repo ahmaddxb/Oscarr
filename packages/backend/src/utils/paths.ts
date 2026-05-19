@@ -15,7 +15,6 @@ const thisDir = dirname(fileURLToPath(import.meta.url));
 export const BACKEND_ROOT = isBundled ? resolve(thisDir, '..') : resolve(thisDir, '../..');
 export const BACKEND_DIST = resolve(BACKEND_ROOT, 'dist');
 export const BACKEND_PRISMA_DIR = resolve(BACKEND_ROOT, 'prisma');
-export const BACKEND_PACKAGE_JSON = resolve(BACKEND_ROOT, 'package.json');
 
 export const PROJECT_ROOT = resolve(BACKEND_ROOT, '../..');
 export const PROJECT_PACKAGE_JSON = resolve(PROJECT_ROOT, 'package.json');

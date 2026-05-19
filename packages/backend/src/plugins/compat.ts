@@ -1,7 +1,7 @@
 import semver from 'semver';
 import type { PluginManifest } from './types.js';
 import { readFileSync } from 'node:fs';
-import { BACKEND_PACKAGE_JSON } from '../utils/paths.js';
+import { PROJECT_PACKAGE_JSON } from '../utils/paths.js';
 
 /**
  * 🟢 `verified`     — Oscarr's current version is listed in the plugin's testedAgainst.
@@ -15,7 +15,9 @@ let cachedVersion: string | null = null;
 export function getOscarrVersion(): string {
   if (cachedVersion) return cachedVersion;
   try {
-    const pkg = JSON.parse(readFileSync(BACKEND_PACKAGE_JSON, 'utf-8')) as { version?: string };
+    // Read from root package.json — the prod Docker image rewrites packages/backend/package.json
+    // from package.prod.json which has no version field.
+    const pkg = JSON.parse(readFileSync(PROJECT_PACKAGE_JSON, 'utf-8')) as { version?: string };
     cachedVersion = pkg.version ?? '0.0.0';
   } catch {
     cachedVersion = '0.0.0';
