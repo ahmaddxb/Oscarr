@@ -1,8 +1,24 @@
+import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../../../utils/prisma.js';
 import { getServiceDefinition } from '../../../providers/index.js';
 import { logEvent } from '../../../utils/logEvent.js';
 import { parseId } from '../../../utils/params.js';
+
+/** Mint a new webhook secret on first need. Stored in `AppSettings.apiKey` (legacy field
+ *  kept alive for the /webhooks callback auth) and reused for every subsequent enable. */
+async function ensureWebhookSecret(): Promise<string> {
+  const settings = await prisma.appSettings.findUnique({ where: { id: 1 }, select: { apiKey: true } });
+  if (settings?.apiKey) return settings.apiKey;
+  const apiKey = crypto.randomBytes(32).toString('hex');
+  await prisma.appSettings.upsert({
+    where: { id: 1 },
+    update: { apiKey },
+    create: { id: 1, apiKey, updatedAt: new Date() },
+  });
+  logEvent('info', 'Webhook', 'Generated webhook callback secret (AppSettings.apiKey)');
+  return apiKey;
+}
 
 /** Per-service webhook registration — status probe, enable (register on the *arr server and
  *  persist the returned ID on the Service row), disable (remove on the *arr side, null the ID).
@@ -70,8 +86,8 @@ export async function servicesWebhookRoutes(app: FastifyInstance) {
     const client = def.createClient(config);
     if (!client.registerWebhook) return reply.status(400).send({ error: 'Service does not support webhooks' });
 
-    const settings = await prisma.appSettings.findUnique({ where: { id: 1 }, select: { siteUrl: true, apiKey: true } });
-    if (!settings?.apiKey) return reply.status(400).send({ error: 'API key not configured (Admin > General)' });
+    const apiKey = await ensureWebhookSecret();
+    const settings = await prisma.appSettings.findUnique({ where: { id: 1 }, select: { siteUrl: true } });
 
     const protocol = request.headers['x-forwarded-proto'] || 'http';
     const host = request.headers['x-forwarded-host'] || request.headers.host;
@@ -79,7 +95,7 @@ export async function servicesWebhookRoutes(app: FastifyInstance) {
     const webhookUrl = `${baseUrl.replace(/\/$/, '')}/api/webhooks/${svc.type}`;
 
     try {
-      const webhookId = await client.registerWebhook('Oscarr', webhookUrl, settings.apiKey);
+      const webhookId = await client.registerWebhook('Oscarr', webhookUrl, apiKey);
       try {
         await prisma.service.update({ where: { id: serviceId }, data: { webhookId } });
       } catch (dbErr) {
@@ -91,8 +107,12 @@ export async function servicesWebhookRoutes(app: FastifyInstance) {
       logEvent('info', 'Webhook', `Webhook enabled for ${svc.name} (ID: ${webhookId})`);
       return { ok: true, webhookId };
     } catch (err) {
-      logEvent('debug', 'Webhook', `Failed to register webhook for ${svc.name}: ${err}`);
-      return reply.status(502).send({ error: 'Failed to register webhook in service' });
+      const axiosErr = err as { response?: { status?: number; data?: unknown }; config?: { url?: string } };
+      const responseBody = axiosErr.response?.data;
+      const detail = err instanceof Error ? err.message : String(err);
+      const bodyDump = typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody);
+      logEvent('debug', 'Webhook', `Failed to register webhook for ${svc.name} (${axiosErr.config?.url}): ${detail} — body: ${bodyDump?.slice(0, 500)}`);
+      return reply.status(502).send({ error: 'WEBHOOK_REGISTER_FAILED', detail: bodyDump ? `${detail} — ${bodyDump.slice(0, 200)}` : detail });
     }
   });
 

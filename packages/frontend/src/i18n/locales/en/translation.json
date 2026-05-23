@@ -31,6 +31,7 @@
   "errors.INVALID_PASSWORD": "Incorrect password.",
   "errors.PASSWORD_REQUIRED": "Password is required.",
   "errors.SERVICE_NOT_FOUND": "Service not found.",
+  "errors.WEBHOOK_REGISTER_FAILED": "Webhook registration failed at the service",
   "common.loading": "Loading...",
   "common.save": "Save",
   "common.saved": "Saved",
