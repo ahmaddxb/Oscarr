@@ -48,13 +48,19 @@ export default function MediaCard({ media, className, availability, index = 0 }:
   };
 
   return (
-    <Link
-      to={link}
+    // The card is a <div> wrapper so the quick-request <button> can live as a sibling of the
+    // <Link> rather than inside it. <button> nested inside <a> is invalid HTML — even with
+    // e.preventDefault() + e.stopPropagation() in the click handler, some browsers still
+    // navigate to the anchor's href because the click event bubbles natively on the DOM
+    // element, not just through React's synthetic event tree. Sibling positioning sidesteps
+    // the whole problem.
+    <div
       className={clsx(
         'group relative flex-shrink-0 rounded-xl overflow-hidden will-change-transform transition-[transform,box-shadow] duration-300 hover:scale-105 hover:z-10 hover:shadow-2xl hover:shadow-black/50',
         className
       )}
     >
+      <Link to={link} className="block">
       {/* Poster */}
       <div className="aspect-[2/3] bg-ndp-surface-light relative">
         {media.poster_path ? (
@@ -102,24 +108,6 @@ export default function MediaCard({ media, className, availability, index = 0 }:
         <span className="text-[10px] uppercase tracking-wider text-ndp-accent font-semibold mt-1">
           {type === 'movie' ? t('common.movie') : t('common.series')}
         </span>
-
-        {/* Quick request button */}
-        {canRequest && !requested && (
-          <button
-            onClick={handleRequest}
-            className="absolute top-2 right-2 p-1.5 bg-ndp-accent rounded-full hover:bg-ndp-accent/80 transition-colors shadow-lg"
-            title={t('media.request')}
-            aria-label={t('media.request')}
-          >
-            {requesting ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <Plus className="w-4 h-4 text-white" />}
-          </button>
-        )}
-        {requested && (
-          <div className="absolute top-2 right-2 p-1.5 bg-ndp-success rounded-full shadow-lg">
-            <CheckCircle className="w-4 h-4 text-white" />
-          </div>
-        )}
-
       </div>
 
       {/* Top-left: media type badge (hidden on hover) */}
@@ -156,7 +144,27 @@ export default function MediaCard({ media, className, availability, index = 0 }:
           {statusBadge.label}
         </div>
       )}
-    </Link>
+      </Link>
+
+      {/* Quick request — rendered OUTSIDE the Link so the click never bubbles to the
+       *  anchor. Visible only on hover (matches the rest of the overlay), positioned
+       *  absolute so it overlays the top-right of the card. */}
+      {canRequest && !requested && (
+        <button
+          onClick={handleRequest}
+          className="absolute top-2 right-2 p-1.5 bg-ndp-accent rounded-full hover:bg-ndp-accent/80 transition-colors shadow-lg opacity-0 group-hover:opacity-100 z-10"
+          title={t('media.request')}
+          aria-label={t('media.request')}
+        >
+          {requesting ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <Plus className="w-4 h-4 text-white" />}
+        </button>
+      )}
+      {requested && (
+        <div className="absolute top-2 right-2 p-1.5 bg-ndp-success rounded-full shadow-lg opacity-0 group-hover:opacity-100 z-10 pointer-events-none">
+          <CheckCircle className="w-4 h-4 text-white" />
+        </div>
+      )}
+    </div>
   );
 }
 
