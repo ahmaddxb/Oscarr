@@ -298,6 +298,8 @@
   "admin.features.auto_approve_desc": "Description of the auto-approve feature",
   "admin.features.calendar": "Feature toggle label: the upcoming releases calendar",
   "admin.features.calendar_desc": "Description of the calendar feature",
+  "admin.features.arr_user_tagging": "Feature toggle label: opt-in per-user tagging in Radarr/Sonarr (adds `oscarr-<username>` to added media)",
+  "admin.features.arr_user_tagging_desc": "Description of the *arr user-tagging toggle — explains the prefix and the opt-in default",
 
   "admin.plugins.no_plugins": "Empty state title when no plugins are installed",
   "admin.plugins.no_plugins_help": "Help text prefix shown before the plugins directory path (caller renders the path separately in a <code> tag)",

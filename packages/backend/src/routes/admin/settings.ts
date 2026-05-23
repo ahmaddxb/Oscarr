@@ -93,6 +93,7 @@ export async function settingsRoutes(app: FastifyInstance) {
           siteUrl: { type: 'string', description: 'Public URL of the instance for notification links' },
           instanceLanguages: { type: 'array', items: { type: 'string' }, description: 'Instance languages (ISO 639-1 codes)' },
           disabledLoginMode: { type: 'string', enum: ['block', 'friendly'], description: 'How disabled accounts are rejected at login' },
+          arrUserTaggingEnabled: { type: 'boolean', description: 'When true, tag added media in Radarr/Sonarr with oscarr-<username>' },
         },
       },
     },
@@ -114,6 +115,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       siteUrl?: string;
       instanceLanguages?: string[];
       disabledLoginMode?: 'block' | 'friendly';
+      arrUserTaggingEnabled?: boolean;
     };
 
     const settings = await prisma.appSettings.upsert({
@@ -134,6 +136,7 @@ export async function settingsRoutes(app: FastifyInstance) {
         siteUrl: body.siteUrl !== undefined ? (body.siteUrl?.trim() || null) : undefined,
         instanceLanguages: body.instanceLanguages ? JSON.stringify(body.instanceLanguages) : undefined,
         disabledLoginMode: body.disabledLoginMode ?? undefined,
+        arrUserTaggingEnabled: body.arrUserTaggingEnabled ?? undefined,
       },
       create: {
         id: 1,
@@ -150,6 +153,7 @@ export async function settingsRoutes(app: FastifyInstance) {
         siteName: body.siteName,
         instanceLanguages: body.instanceLanguages ? JSON.stringify(body.instanceLanguages) : undefined,
         disabledLoginMode: body.disabledLoginMode,
+        arrUserTaggingEnabled: body.arrUserTaggingEnabled,
         updatedAt: new Date(),
       },
     });

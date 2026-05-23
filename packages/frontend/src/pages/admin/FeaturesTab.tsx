@@ -27,6 +27,7 @@ export function FeaturesTab() {
   const [nsfwBlurEnabled, setNsfwBlurEnabled] = useState(true);
   const [missingSearchCooldownMin, setMissingSearchCooldownMin] = useState(60);
   const [disabledLoginMode, setDisabledLoginMode] = useState<'block' | 'friendly'>('friendly');
+  const [arrUserTaggingEnabled, setArrUserTaggingEnabled] = useState(false);
 
   const initialValues = useRef<Record<string, unknown>>({});
 
@@ -44,6 +45,7 @@ export function FeaturesTab() {
         nsfwBlurEnabled: data.nsfwBlurEnabled ?? true,
         missingSearchCooldownMin: data.missingSearchCooldownMin ?? 60,
         disabledLoginMode: (data.disabledLoginMode === 'block' ? 'block' : 'friendly') as 'block' | 'friendly',
+        arrUserTaggingEnabled: data.arrUserTaggingEnabled ?? false,
       };
       setAutoApproveRequests(vals.autoApproveRequests);
       setRequestsEnabled(vals.requestsEnabled);
@@ -51,6 +53,7 @@ export function FeaturesTab() {
       setNsfwBlurEnabled(vals.nsfwBlurEnabled);
       setMissingSearchCooldownMin(vals.missingSearchCooldownMin);
       setDisabledLoginMode(vals.disabledLoginMode);
+      setArrUserTaggingEnabled(vals.arrUserTaggingEnabled);
       initialValues.current = vals;
     } catch (err) {
       console.error('FeaturesTab load failed', err);
@@ -63,8 +66,8 @@ export function FeaturesTab() {
   useEffect(() => { loadAll(); }, [loadAll]);
 
   const currentValues = useMemo(
-    () => ({ autoApproveRequests, requestsEnabled, calendarEnabled, nsfwBlurEnabled, missingSearchCooldownMin, disabledLoginMode }),
-    [autoApproveRequests, requestsEnabled, calendarEnabled, nsfwBlurEnabled, missingSearchCooldownMin, disabledLoginMode]
+    () => ({ autoApproveRequests, requestsEnabled, calendarEnabled, nsfwBlurEnabled, missingSearchCooldownMin, disabledLoginMode, arrUserTaggingEnabled }),
+    [autoApproveRequests, requestsEnabled, calendarEnabled, nsfwBlurEnabled, missingSearchCooldownMin, disabledLoginMode, arrUserTaggingEnabled]
   );
 
   const hasChanges = !loading && Object.keys(initialValues.current).length > 0 &&
@@ -78,6 +81,7 @@ export function FeaturesTab() {
     setNsfwBlurEnabled(iv.nsfwBlurEnabled as boolean);
     setMissingSearchCooldownMin(iv.missingSearchCooldownMin as number);
     setDisabledLoginMode(iv.disabledLoginMode as 'block' | 'friendly');
+    setArrUserTaggingEnabled(iv.arrUserTaggingEnabled as boolean);
   };
 
   const handleSave = async () => {
@@ -90,6 +94,7 @@ export function FeaturesTab() {
         nsfwBlurEnabled,
         missingSearchCooldownMin,
         disabledLoginMode,
+        arrUserTaggingEnabled,
       });
       await refreshFeatures();
       initialValues.current = { ...currentValues };
@@ -124,6 +129,7 @@ export function FeaturesTab() {
     { label: t('admin.features.auto_approve'), desc: t('admin.features.auto_approve_desc'), value: autoApproveRequests, set: setAutoApproveRequests },
     { label: t('admin.features.calendar'), desc: t('admin.features.calendar_desc'), value: calendarEnabled, set: setCalendarEnabled },
     { label: t('admin.features.nsfw_blur'), desc: t('admin.features.nsfw_blur_desc'), value: nsfwBlurEnabled, set: setNsfwBlurEnabled },
+    { label: t('admin.features.arr_user_tagging'), desc: t('admin.features.arr_user_tagging_desc'), value: arrUserTaggingEnabled, set: setArrUserTaggingEnabled },
   ];
 
   return (

@@ -832,6 +832,8 @@
   "admin.features.auto_approve_desc": "Les demandes sont automatiquement approuvées sans validation admin",
   "admin.features.nsfw_blur": "Flou NSFW",
   "admin.features.nsfw_blur_desc": "Flouter le contenu classé explicitement adulte (NC-17, X). N'affecte pas le contenu avec restriction d'âge (R, 18+).",
+  "admin.features.arr_user_tagging": "Tagger les utilisateurs dans Radarr/Sonarr",
+  "admin.features.arr_user_tagging_desc": "Quand activé, chaque film ou série qu'Oscarr ajoute dans Radarr/Sonarr est taggé avec `oscarr-<utilisateur>` (le demandeur). Utile pour retrouver qui a demandé quoi depuis l'UI *arr. Désactivé par défaut — les noms d'utilisateur n'apparaissent dans tes instances *arr que si tu actives explicitement cette option.",
   "admin.features.calendar": "Calendrier",
   "admin.features.calendar_desc": "Calendrier des sorties à venir",
   "admin.danger.title": "Zone dangereuse",

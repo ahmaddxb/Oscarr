@@ -74,7 +74,7 @@ export class RadarrClient implements ArrClient {
   }
 
   async getOrCreateTag(username: string): Promise<number> {
-    const label = `ndp-${username}`.toLowerCase().replaceAll(/[^a-z0-9-]/g, '');
+    const label = `oscarr-${username}`.toLowerCase().replaceAll(/[^a-z0-9-]/g, '');
     const tags = await this.getTags();
     const existing = tags.find((t) => t.label === label);
     if (existing) return existing.id;

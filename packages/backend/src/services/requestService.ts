@@ -190,7 +190,12 @@ async function sendToArrService(
   // Priority: explicit override > rule match > default folder > first root folder
   const folderPath = rootFolderOverride || ctx.ruleMatch?.folderPath || ctx.defaultFolder
     || (await client.getRootFolders())[0]?.path || client.defaultRootFolder;
-  const tagId = await client.getOrCreateTag(username);
+
+  // User tagging is opt-in via AppSettings.arrUserTaggingEnabled. When off (default), no
+  // tag is created or attached — the *arr UI stays free of Oscarr-internal username tags.
+  // Read each call so the toggle takes effect without a server restart.
+  const settings = await prisma.appSettings.findUnique({ where: { id: 1 }, select: { arrUserTaggingEnabled: true } });
+  const tags: number[] = settings?.arrUserTaggingEnabled ? [await client.getOrCreateTag(username)] : [];
 
   const externalId = mediaType === 'movie' ? media.tmdbId : media.tvdbId;
   if (!externalId) throw new Error(`Missing external ID for ${mediaType} "${media.title}"`);
@@ -209,7 +214,7 @@ async function sendToArrService(
     externalId,
     qualityProfileId: profileId,
     rootFolderPath: folderPath,
-    tags: [tagId],
+    tags,
     seasons,
     seriesType: ctx.ruleMatch?.seriesType as string | undefined,
   });
