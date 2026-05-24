@@ -1,4 +1,5 @@
 export * from './requestStatus.js';
+export * from './mediaStatus.js';
 export * from './tmdb.js';
 export * from './plugins.js';
 export * from './pluginContext.js';
