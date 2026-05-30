@@ -273,7 +273,7 @@ export class PluginEngine {
       if (!plugin.enabled || plugin.error) continue;
       if (!plugin.registration.onEnable) continue;
       const onEnable = plugin.registration.onEnable;
-      const ctx = createContext(plugin.manifest, this.getContextDeps());
+      const ctx = this.contextFor(plugin);
       enableTasks.push(
         Promise.resolve(onEnable(ctx)).catch((err) => {
           this.log('error', `Boot-time onEnable failed for "${plugin.manifest.id}": ${err}`);
@@ -289,7 +289,7 @@ export class PluginEngine {
     for (const [id, plugin] of this.plugins) {
       if (!plugin.enabled || plugin.error || !plugin.registration.registerJobs) continue;
       try {
-        const ctx = createContext(plugin.manifest, this.getContextDeps());
+        const ctx = this.contextFor(plugin);
         const jobs = plugin.registration.registerJobs(ctx);
         for (const [key, handler] of Object.entries(jobs)) {
           handlers[key] = handler;
@@ -380,7 +380,7 @@ export class PluginEngine {
     // explicitly asked to uninstall and we honour that even if cleanup is partial.
     if (plugin.enabled && plugin.registration.onDisable) {
       try {
-        const ctx = createContext(plugin.manifest, this.getContextDeps());
+        const ctx = this.contextFor(plugin);
         let timer: NodeJS.Timeout | undefined;
         const timeout = new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error('onDisable timed out after 5s')), 5000);
@@ -458,10 +458,10 @@ export class PluginEngine {
     // Call lifecycle hook before persisting (best-effort, don't block toggle)
     try {
       if (enabled && plugin.registration.onEnable) {
-        const ctx = createContext(plugin.manifest, this.getContextDeps());
+        const ctx = this.contextFor(plugin);
         await plugin.registration.onEnable(ctx);
       } else if (!enabled && plugin.registration.onDisable) {
-        const ctx = createContext(plugin.manifest, this.getContextDeps());
+        const ctx = this.contextFor(plugin);
         await plugin.registration.onDisable(ctx);
       }
     } catch (err) {
@@ -546,7 +546,7 @@ export class PluginEngine {
     for (const [id, plugin] of this.plugins) {
       if (!plugin.enabled || plugin.error || !plugin.registration.registerGuards) continue;
       try {
-        const ctx = createContext(plugin.manifest, this.getContextDeps());
+        const ctx = this.contextFor(plugin);
         const guards = plugin.registration.registerGuards(ctx);
         const guard = guards[guardName];
         if (!guard) continue;
@@ -596,6 +596,11 @@ export class PluginEngine {
     const values = state ? JSON.parse(state.settings) : {};
     this.settingsCache.set(pluginId, values);
     return values;
+  }
+
+  /** Build a fresh PluginContext for a loaded plugin (single construction point). */
+  private contextFor(plugin: LoadedPlugin) {
+    return createContext(plugin.manifest, this.getContextDeps());
   }
 
   private getContextDeps(): ContextFactoryDeps {
