@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/version-0.8.1-6366f1?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs Welcome" />
-  <a href="https://discord.gg/BKMaWhVCRr"><img src="https://img.shields.io/badge/Discord-join-5865F2?style=flat-square&amp;logo=discord&amp;logoColor=white" alt="Discord" /></a>
+  <a href="https://discord.gg/vB25SNTqCS"><img src="https://img.shields.io/badge/Discord-join-5865F2?style=flat-square&amp;logo=discord&amp;logoColor=white" alt="Discord" /></a>
   <br />
   <a href="https://sonarcloud.io/summary/overall?id=arediss_Oscarr"><img src="https://sonarcloud.io/api/project_badges/measure?project=arediss_Oscarr&amp;metric=alert_status" alt="Quality Gate" /></a>
   <a href="https://sonarcloud.io/summary/overall?id=arediss_Oscarr"><img src="https://sonarcloud.io/api/project_badges/measure?project=arediss_Oscarr&amp;metric=security_rating" alt="Security Rating" /></a>
