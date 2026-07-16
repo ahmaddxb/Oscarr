@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '@/lib/api';
 import { useNsfwFilter } from '@/hooks/useNsfwFilter';
+import { useAuth } from '@/context/AuthContext';
 import { useDownloadForMedia, useOnDownloadComplete } from '@/hooks/useDownloads';
 import { invalidateMediaStatus, updateMediaStatusCache } from '@/hooks/useMediaStatus';
+import { type MediaStateCategory, type RequestStatus, toMediaStateCategory } from '@oscarr/shared';
 import type { TmdbMedia, Media } from '@/types';
 
 interface SonarrSeason {
@@ -34,6 +36,7 @@ function loadQualityOptions(): Promise<QualityOption[]> {
 
 export function useMediaDetailData(id: string | undefined, type: 'movie' | 'tv') {
   const { addNsfwIds } = useNsfwFilter();
+  const { user } = useAuth();
   const [media, setMedia] = useState<TmdbMedia | null>(null);
   const [dbMedia, setDbMedia] = useState<Media | null>(null);
   const [sonarrSeasons, setSonarrSeasons] = useState<SonarrSeason[]>([]);
@@ -50,17 +53,29 @@ export function useMediaDetailData(id: string | undefined, type: 'movie' | 'tv')
     if (data.id) setDbMedia(data as unknown as Media);
     if (data.sonarrSeasons) setSonarrSeasons(data.sonarrSeasons as SonarrSeason[]);
     if (data.inLibrary) setInLibrary(true);
-    if (data.status === 'available' && !data.id) setInLibrary(true);
+    if (data.statusCategory === 'AVAILABLE' && !data.id) setInLibrary(true);
     if (data.activeQualityOptionIds) setActiveQualityOptionIds(data.activeQualityOptionIds as number[]);
     if (data.audioLanguages) setAudioLanguages(data.audioLanguages as string[]);
     if (data.subtitleLanguages) setSubtitleLanguages(data.subtitleLanguages as string[]);
     if (data.nsfw && id) addNsfwIds([Number.parseInt(id, 10)]);
-    // Update global status cache so list pages reflect the latest state on back navigation
-    if (data.status && id) {
+    // Update global status cache so list pages reflect the latest state on back navigation.
+    // The payload carries every request row — derive the viewer's own latest one so a decline is
+    // reflected immediately (`null` = known none, clears the stale badge; `undefined` = unknown
+    // viewer, keep the cached value rather than wrongly blanking it).
+    if (data.statusCategory && id) {
       const tmdbId = Number.parseInt(id, 10);
-      if (tmdbId) updateMediaStatusCache(tmdbId, type, data.status as string);
+      if (tmdbId) {
+        const requests = (data.requests ?? []) as { userId?: number; status?: string; createdAt?: string }[];
+        const ownStatus = user
+          ? (requests
+              .filter((r) => r.userId === user.id)
+              .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())[0]
+              ?.status as RequestStatus | undefined) ?? null
+          : undefined;
+        updateMediaStatusCache(tmdbId, type, toMediaStateCategory(data.statusCategory), ownStatus);
+      }
     }
-  }, [id, type, addNsfwIds]);
+  }, [id, type, addNsfwIds, user]);
 
   useEffect(() => {
     if (qualityOptionsCache) return;
@@ -133,7 +148,7 @@ export function useMediaDetailData(id: string | undefined, type: 'movie' | 'tv')
       api.get(`/media/tmdb/${capturedId}/${type}`).then(({ data }) => {
         if (id !== capturedId) return;
         applyDbData(data);
-        if (data.status !== 'available' && !data.inLibrary && retries < 3) {
+        if (data.statusCategory !== 'AVAILABLE' && !data.inLibrary && retries < 3) {
           retries++;
           retryTimerRef.current = setTimeout(check, 5000);
         }

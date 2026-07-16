@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '@/lib/api';
 import type { TmdbMedia } from '@/types';
+import type { MediaStateCategory, RequestStatus } from '@oscarr/shared';
 
 interface MediaStatus {
-  status: string;
-  requestStatus?: string;
+  statusCategory: MediaStateCategory;
+  requestStatus?: RequestStatus;
 }
 
 type StatusMap = Record<string, MediaStatus>;
@@ -34,7 +35,7 @@ async function sendBatch(items: { tmdbId: number; mediaType: string }[]) {
   for (const item of items) {
     const key = `${item.mediaType}:${item.tmdbId}`;
     if (!(key in data)) {
-      globalCache[key] = { status: 'unknown' };
+      globalCache[key] = { statusCategory: 'UNAVAILABLE' };
       cacheTimes[key] = now;
     }
   }
@@ -77,10 +78,15 @@ export function invalidateMediaStatus(tmdbId: number, mediaType: string) {
   delete globalCache[key];
 }
 
-/** Update cache for a specific media with a known status (avoids stale data on back navigation) */
-export function updateMediaStatusCache(tmdbId: number, mediaType: string, status: string, requestStatus?: string) {
+/** Update cache for a specific media with a known status (avoids stale data on back navigation).
+ *  requestStatus is tri-state: a value sets it, `null` clears it (caller KNOWS there is no active
+ *  request — e.g. it was declined), `undefined` keeps the cached one (caller doesn't know). The
+ *  keep-on-undefined default avoids blanking the badge, but callers that hold the fresh request
+ *  state must pass it explicitly or a decline keeps showing as "Requested" until the TTL expires. */
+export function updateMediaStatusCache(tmdbId: number, mediaType: string, statusCategory: MediaStateCategory, requestStatus?: RequestStatus | null) {
   const key = `${mediaType}:${tmdbId}`;
-  globalCache[key] = { status, requestStatus };
+  const next = requestStatus === undefined ? globalCache[key]?.requestStatus : requestStatus ?? undefined;
+  globalCache[key] = { statusCategory, requestStatus: next };
   cacheTimes[key] = Date.now();
   listeners.forEach((cb) => cb());
 }

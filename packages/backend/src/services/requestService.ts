@@ -1,13 +1,18 @@
 import { prisma } from '../utils/prisma.js';
+import { getAppSettings } from '../utils/appSettings.js';
 import { getArrClient, getArrClientForService, getServiceTypeForMedia } from '../providers/index.js';
 import { getMovieDetails, getTvDetails } from './tmdb.js';
+import { findTvPlaceholder, upgradeOrMergeTvPlaceholder } from './mediaService.js';
 import { matchFolderRule } from './folderRules.js';
 import { logEvent } from '../utils/logEvent.js';
+import { isQualityAllowedForRole } from '../utils/qualityAccess.js';
 import { getServiceById, getAllServices } from '../utils/services.js';
 import { VALID_MEDIA_TYPES } from '../utils/params.js';
 import { ACTIVE_REQUEST_STATUSES, COMPLETABLE_REQUEST_STATUSES } from '@oscarr/shared';
+import type { RequestStatusKind } from '@oscarr/shared';
 import { safeNotify, safeUserNotify, buildSiteLink } from '../utils/safeNotify.js';
 import { pluginEngine } from '../plugins/engine.js';
+import { transitionRequestStatus } from './requestStatusTransition.js';
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -47,26 +52,20 @@ export async function findOrCreateMedia(tmdbId: number, mediaType: 'movie' | 'tv
   const releaseDate = 'release_date' in tmdbData ? tmdbData.release_date : tmdbData.first_air_date;
   const tvdbId = mediaType === 'tv' ? (tmdbData.external_ids?.tvdb_id ?? null) : null;
 
-  // TV: upgrade a sync-created placeholder (tmdbId<0) before creating a duplicate.
+  // TV: upgrade a placeholder (tmdbId<0) into the canonical row before creating a duplicate.
   if (mediaType === 'tv' && tvdbId) {
-    const placeholder = await prisma.media.findFirst({
-      where: { mediaType: 'tv', tvdbId, tmdbId: { lt: 0 } },
-    });
+    const placeholder = await findTvPlaceholder(tvdbId);
     if (placeholder) {
-      await prisma.media.update({
-        where: { id: placeholder.id },
-        data: {
-          tmdbId,
-          title: placeholder.title || title,
-          overview: placeholder.overview ?? (tmdbData.overview || null),
-          posterPath: placeholder.posterPath ?? tmdbData.poster_path,
-          backdropPath: placeholder.backdropPath ?? tmdbData.backdrop_path,
-          releaseDate: placeholder.releaseDate ?? (releaseDate || null),
-          voteAverage: placeholder.voteAverage ?? tmdbData.vote_average,
-          genres: placeholder.genres ?? (tmdbData.genres ? JSON.stringify(tmdbData.genres.map(g => g.name)) : null),
-        },
+      return upgradeOrMergeTvPlaceholder(placeholder, tmdbId, {
+        tvdbId,
+        title: placeholder.title || title,
+        overview: placeholder.overview ?? (tmdbData.overview || null),
+        posterPath: placeholder.posterPath ?? tmdbData.poster_path,
+        backdropPath: placeholder.backdropPath ?? tmdbData.backdrop_path,
+        releaseDate: placeholder.releaseDate ?? (releaseDate || null),
+        voteAverage: placeholder.voteAverage ?? tmdbData.vote_average,
+        genres: placeholder.genres ?? (tmdbData.genres ? JSON.stringify(tmdbData.genres.map((g) => g.name)) : null),
       });
-      return prisma.media.findUniqueOrThrow({ where: { id: placeholder.id } });
     }
   }
 
@@ -134,7 +133,7 @@ export async function resolveServiceContext(
   userId: number | null,
   qualityOptionId?: number,
 ): Promise<ServiceContext> {
-  const settings = await prisma.appSettings.findUnique({ where: { id: 1 } });
+  const settings = await getAppSettings();
   const defaultProfileId = settings?.defaultQualityProfile ?? null;
 
   const tmdbData = mediaType === 'movie'
@@ -152,8 +151,13 @@ export async function resolveServiceContext(
     const mapping = await prisma.qualityMapping.findFirst({
       where: {
         qualityOptionId,
+        // When a folder rule matched a service, look up the quality mapping on THAT service;
+        // otherwise (serviceId undefined = ignored) fall back to the first enabled service. The
+        // enabled/type filter stays on both branches so a matched-but-disabled service yields no
+        // mapping and falls back to the default profile, instead of applying a profile id that is
+        // only valid on another instance.
         serviceId: targetServiceId ?? undefined,
-        service: targetServiceId ? undefined : { type: serviceType, enabled: true },
+        service: { type: serviceType, enabled: true },
       },
       include: { service: true },
     });
@@ -195,7 +199,7 @@ async function sendToArrService(
   // User tagging is opt-in via AppSettings.arrUserTaggingEnabled. When off (default), no
   // tag is created or attached — the *arr UI stays free of Oscarr-internal username tags.
   // Read each call so the toggle takes effect without a server restart.
-  const settings = await prisma.appSettings.findUnique({ where: { id: 1 }, select: { arrUserTaggingEnabled: true } });
+  const settings = await getAppSettings();
   const tags: number[] = settings?.arrUserTaggingEnabled ? [await client.getOrCreateTag(username)] : [];
 
   const externalId = mediaType === 'movie' ? media.tmdbId : media.tvdbId;
@@ -333,23 +337,12 @@ export async function createUserRequest(input: CreateRequestInput): Promise<Crea
 
   const media = await findOrCreateMedia(tmdbId, mediaType);
 
-  const settings = await prisma.appSettings.findUnique({ where: { id: 1 } });
+  const settings = await getAppSettings();
   let shouldAutoApprove = user.role === 'admin' || (settings?.autoApproveRequests ?? false);
   if (input.qualityOptionId != null) {
     const qualityOpt = await prisma.qualityOption.findUnique({ where: { id: input.qualityOptionId } });
-    if (qualityOpt?.allowedRoles && user.role !== 'admin') {
-      try {
-        const roles = JSON.parse(qualityOpt.allowedRoles) as string[];
-        if (roles.length > 0 && !roles.includes(user.role)) {
-          return { ok: false, status: 403, code: 'QUALITY_NOT_ALLOWED', error: 'QUALITY_NOT_ALLOWED' };
-        }
-      } catch (err) {
-        // Historical HTTP behaviour was permissive here, but silently opening a role-gated
-        // quality option on corrupt `allowedRoles` JSON is an ACL-bypass footgun. Keep the
-        // permissive fallback for compat, but surface the corruption so an admin can fix
-        // the bad row instead of learning about it via unexpected approvals.
-        logEvent('error', 'Request', `Malformed allowedRoles JSON on qualityOption ${input.qualityOptionId} — permissive fallback engaged: ${String(err)}`);
-      }
+    if (qualityOpt && user.role !== 'admin' && !isQualityAllowedForRole(qualityOpt.allowedRoles, user.role)) {
+      return { ok: false, status: 403, code: 'QUALITY_NOT_ALLOWED', error: 'QUALITY_NOT_ALLOWED' };
     }
     if (qualityOpt?.approvalMode === 'auto') shouldAutoApprove = true;
     else if (qualityOpt?.approvalMode === 'manual') shouldAutoApprove = user.role === 'admin';
@@ -358,25 +351,29 @@ export async function createUserRequest(input: CreateRequestInput): Promise<Crea
   // Dedup + create in one transaction so two concurrent calls by the same user can't both pass
   // the dedup check and both insert (SQLite serializes writes, but defensive against future
   // backends and intent-clarity for the reader).
+  const initialStatus: RequestStatusKind = shouldAutoApprove ? 'approved' : 'pending';
   const mediaRequest = await prisma.$transaction(async (tx) => {
     const dup = await tx.mediaRequest.findFirst({
       where: { mediaId: media.id, userId: user.id, status: { in: [...ACTIVE_REQUEST_STATUSES] } },
       select: { id: true },
     });
     if (dup) throw new DuplicateRequestError();
-    return tx.mediaRequest.create({
-      data: {
-        mediaId: media.id,
-        userId: user.id,
-        mediaType,
-        seasons: validSeasons ? JSON.stringify(validSeasons) : null,
-        rootFolder: typeof input.rootFolder === 'string' ? input.rootFolder : null,
-        qualityOptionId: input.qualityOptionId ?? null,
-        status: shouldAutoApprove ? 'approved' : 'pending',
-        approvedById: shouldAutoApprove ? user.id : null,
-      },
-      include: { media: true, user: { select: { id: true, displayName: true, avatar: true } } },
-    });
+    return transitionRequestStatus(
+      { requestId: undefined, from: undefined, to: initialStatus, why: shouldAutoApprove ? 'user-request-create-auto-approve' : 'user-request-create' },
+      () => tx.mediaRequest.create({
+        data: {
+          mediaId: media.id,
+          userId: user.id,
+          mediaType,
+          seasons: validSeasons ? JSON.stringify(validSeasons) : null,
+          rootFolder: typeof input.rootFolder === 'string' ? input.rootFolder : null,
+          qualityOptionId: input.qualityOptionId ?? null,
+          status: initialStatus,
+          approvedById: shouldAutoApprove ? user.id : null,
+        },
+        include: { media: true, user: { select: { id: true, displayName: true, avatar: true } } },
+      }),
+    );
   }).catch((err) => {
     if (err instanceof DuplicateRequestError) return null;
     throw err;
@@ -392,16 +389,18 @@ export async function createUserRequest(input: CreateRequestInput): Promise<Crea
 
     // Post-send writes go through a single transaction so the request status and the media
     // status flip can't drift if the process crashes between them.
-    if (sent && media.status !== 'available' && media.status !== 'processing') {
+    if (sent && media.statusCategory !== 'AVAILABLE' && media.statusCategory !== 'PROCESSING') {
       await prisma.media.update({
         where: { id: media.id },
-        data: { status: 'searching' },
+        data: { statusCategory: 'SEARCHING' },
       }).catch((err) => {
         logEvent('warn', 'Request', `Status-flip to 'searching' failed for media ${media.id} (request ${mediaRequest.id}): ${String(err)}`);
       });
     } else if (!sent) {
-      await prisma.mediaRequest.update({ where: { id: mediaRequest.id }, data: { status: 'failed' } })
-        .catch((err) => logEvent('warn', 'Request', `Failed to mark request ${mediaRequest.id} as failed after sendToService rejected: ${String(err)}`));
+      await transitionRequestStatus(
+        { requestId: mediaRequest.id, from: mediaRequest.status as RequestStatusKind, to: 'failed', why: 'dispatch-failed' },
+        () => prisma.mediaRequest.update({ where: { id: mediaRequest.id }, data: { status: 'failed' } }),
+      ).catch((err) => logEvent('warn', 'Request', `Failed to mark request ${mediaRequest.id} as failed after sendToService rejected: ${String(err)}`));
       sendFailed = true;
     }
   }
@@ -460,25 +459,32 @@ export async function requestCollectionMovie(
   const dbMedia = await prisma.media.findUnique({
     where: { tmdbId_mediaType: { tmdbId: movieTmdbId, mediaType: 'movie' } },
   });
-  if (dbMedia?.status === 'available') return false;
+  if (dbMedia?.statusCategory === 'AVAILABLE') return false;
 
   const media = dbMedia ?? await findOrCreateMedia(movieTmdbId, 'movie');
 
-  const req = await prisma.mediaRequest.create({
-    data: {
-      mediaId: media.id,
-      userId: user.id,
-      mediaType: 'movie',
-      status: user.role === 'admin' ? 'approved' : 'pending',
-      approvedById: user.role === 'admin' ? user.id : null,
-    },
-  });
+  const collectionInitialStatus: RequestStatusKind = user.role === 'admin' ? 'approved' : 'pending';
+  const req = await transitionRequestStatus(
+    { requestId: undefined, from: undefined, to: collectionInitialStatus, why: user.role === 'admin' ? 'collection-request-auto-approve' : 'collection-request-create' },
+    () => prisma.mediaRequest.create({
+      data: {
+        mediaId: media.id,
+        userId: user.id,
+        mediaType: 'movie',
+        status: collectionInitialStatus,
+        approvedById: user.role === 'admin' ? user.id : null,
+      },
+    }),
+  );
 
   if (user.role === 'admin') {
     const tagName = await getUserTagName(user.id);
     const sent = await sendToService(media, 'movie', tagName, user.id);
     if (!sent) {
-      await prisma.mediaRequest.update({ where: { id: req.id }, data: { status: 'failed' } });
+      await transitionRequestStatus(
+        { requestId: req.id, from: collectionInitialStatus, to: 'failed', why: 'dispatch-failed' },
+        () => prisma.mediaRequest.update({ where: { id: req.id }, data: { status: 'failed' } }),
+      );
     }
   }
 
@@ -490,13 +496,16 @@ export async function requestCollectionMovie(
 // ---------------------------------------------------------------------------
 
 export async function promoteStaleStatuses(): Promise<void> {
-  await prisma.mediaRequest.updateMany({
-    where: {
-      status: { in: [...COMPLETABLE_REQUEST_STATUSES] },
-      media: { status: 'available' },
-    },
-    data: { status: 'available' },
-  });
+  await transitionRequestStatus(
+    { requestId: undefined, from: undefined, to: 'available', why: 'cascade-media-available' },
+    () => prisma.mediaRequest.updateMany({
+      where: {
+        status: { in: [...COMPLETABLE_REQUEST_STATUSES] },
+        media: { statusCategory: 'AVAILABLE' },
+      },
+      data: { status: 'available' },
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -517,7 +526,10 @@ export async function retryFailedRequests(): Promise<{ retried: number; succeede
     const seasons = req.seasons ? JSON.parse(req.seasons) : undefined;
     const sent = await sendToService(req.media, req.mediaType, tagName, req.userId, seasons, req.qualityOptionId ?? undefined);
     if (sent) {
-      await prisma.mediaRequest.update({ where: { id: req.id }, data: { status: 'approved' } });
+      await transitionRequestStatus(
+        { requestId: req.id, from: req.status as RequestStatusKind, to: 'approved', why: 'scheduler-retry' },
+        () => prisma.mediaRequest.update({ where: { id: req.id }, data: { status: 'approved' } }),
+      );
       succeeded++;
     }
   }

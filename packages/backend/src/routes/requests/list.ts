@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../../utils/prisma.js';
 import { parseId, parsePage } from '../../utils/params.js';
-import { REQUEST_STATUSES } from '@oscarr/shared';
+import { REQUEST_STATUSES, COMPLETABLE_REQUEST_STATUSES } from '@oscarr/shared';
 import { promoteStaleStatuses, resolveServiceContext } from '../../services/requestService.js';
+import { getServiceTypeForMedia } from '../../providers/index.js';
 
 const VALID_STATUSES = new Set<string>(REQUEST_STATUSES);
 
@@ -25,7 +26,7 @@ export async function requestListRoutes(app: FastifyInstance) {
       },
     },
   }, async (request) => {
-    const user = request.user as { id: number; role: string };
+    const user = request.user;
     const { status, page, userId, mediaType, qualityOptionId } = request.query as {
       status?: string; page?: string; userId?: string; mediaType?: string; qualityOptionId?: string;
     };
@@ -86,21 +87,23 @@ export async function requestListRoutes(app: FastifyInstance) {
   });
 
   app.get('/stats', async (request) => {
-    const user = request.user as { id: number; role: string };
+    const user = request.user;
     const userFilter = request.ownerScoped ? { userId: user.id } : {};
 
-    const [total, pending, approved, available, declined, failed, searching, upcoming] = await Promise.all([
+    // `processing` was counting Media.status values ('searching'/'upcoming') which are
+    // never written to MediaRequest.status, so it always returned 0. Use COMPLETABLE
+    // (approved + processing + failed) — the real "in flight from dispatch to completion".
+    const [total, pending, approved, available, declined, failed, processing] = await Promise.all([
       prisma.mediaRequest.count({ where: userFilter }),
       prisma.mediaRequest.count({ where: { ...userFilter, status: 'pending' } }),
       prisma.mediaRequest.count({ where: { ...userFilter, status: 'approved' } }),
       prisma.mediaRequest.count({ where: { ...userFilter, status: 'available' } }),
       prisma.mediaRequest.count({ where: { ...userFilter, status: 'declined' } }),
       prisma.mediaRequest.count({ where: { ...userFilter, status: 'failed' } }),
-      prisma.mediaRequest.count({ where: { ...userFilter, status: { in: ['searching'] } } }),
-      prisma.mediaRequest.count({ where: { ...userFilter, status: 'upcoming' } }),
+      prisma.mediaRequest.count({ where: { ...userFilter, status: { in: [...COMPLETABLE_REQUEST_STATUSES] } } }),
     ]);
 
-    return { total, pending, approved, available, declined, failed, processing: searching + upcoming };
+    return { total, pending, approved, available, declined, failed, processing };
   });
 
   app.get('/:id/resolve', {
@@ -134,7 +137,7 @@ export async function requestListRoutes(app: FastifyInstance) {
 
     const matchedRuleName = ctx.ruleMatch?.ruleName ?? null;
 
-    const serviceType = mediaRequest.mediaType === 'movie' ? 'radarr' : 'sonarr';
+    const serviceType = getServiceTypeForMedia(mediaRequest.mediaType);
     let availableRootFolders: { path: string }[] = [];
     try {
       const { getArrClient, getArrClientForService } = await import('../../providers/index.js');

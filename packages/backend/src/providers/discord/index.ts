@@ -4,6 +4,7 @@ import type { AuthHelpers, AuthProvider, Provider } from '../types.js';
 import { getProviderConfig, isProviderEnabled } from '../authSettings.js';
 import { resolveOAuthCallbackUrl } from '../../utils/publicUrl.js';
 import { withRetry } from '../../utils/fetchWithRetry.js';
+import { setAuthCookie } from '../../utils/authCookie.js';
 
 const AUTHORIZE_URL = 'https://discord.com/oauth2/authorize';
 const TOKEN_URL = 'https://discord.com/api/oauth2/token';
@@ -124,7 +125,7 @@ const discordAuth: AuthProvider = {
           const fullUrl = request.url; // includes /api/auth/discord/authorize?action=link
           return reply.redirect(`/login?next=${encodeURIComponent(fullUrl)}`);
         }
-        userId = (request.user as { id: number }).id;
+        userId = request.user.id;
       }
 
       const state = randomUUID();
@@ -273,20 +274,7 @@ const discordAuth: AuthProvider = {
           throw err;
         }
 
-        const jwt = app.jwt.sign(
-          { id: resolved.id, email: resolved.email, role: resolved.role },
-          { expiresIn: '24h' }
-        );
-        return reply
-          .setCookie('token', jwt, {
-            path: '/',
-            httpOnly: true,
-            secure:
-              process.env.COOKIE_SECURE === 'true' ||
-              (process.env.COOKIE_SECURE !== 'false' && request.protocol === 'https'),
-            sameSite: 'lax',
-            maxAge: 24 * 60 * 60,
-          })
+        return setAuthCookie(reply, app, resolved)
           .redirect('/');
       }
     );

@@ -1,11 +1,12 @@
 import { prisma } from '../../utils/prisma.js';
+import { patchAppSettings } from '../../utils/appSettings.js';
 import { getArrClient } from '../../providers/index.js';
 import type { ArrClient, ArrMediaItem } from '../../providers/types.js';
 import { getServiceConfig } from '../../utils/services.js';
 import { logEvent } from '../../utils/logEvent.js';
 import type { SyncResult } from './helpers.js';
 import { sendAvailabilityNotifications } from './helpers.js';
-import { COMPLETABLE_REQUEST_STATUSES } from '@oscarr/shared';
+import { isTmdbMediaTypeConflict, mergeTvPlaceholderInto, cascadeRequestsForCategory } from '../mediaService.js';
 import type { Media } from '@prisma/client';
 
 export async function syncArrService(serviceType: string, since?: Date | null): Promise<SyncResult> {
@@ -26,11 +27,13 @@ export async function syncArrService(serviceType: string, since?: Date | null): 
     if (since) {
       const newlyAdded = allMedia.filter(m => m.addedDate && new Date(m.addedDate) > since);
       // Items with file that aren't marked available in DB
-      const availableItems = allMedia.filter(m => m.status === 'available');
+      const availableItems = allMedia.filter(m => m.statusCategory === 'AVAILABLE');
       const availableExternalIds = new Set(availableItems.map(m => m.externalId));
+      // Always refresh in-progress items (queue / partial) so PROCESSING + the *arr id land within one cycle, even without a webhook.
+      const inProgressItems = allMedia.filter(m => m.statusCategory === 'PROCESSING');
 
       const notAvailableInDb = await prisma.media.findMany({
-        where: { mediaType: client.mediaType, status: { in: ['unknown', 'pending', 'searching', 'processing', 'upcoming'] } },
+        where: { mediaType: client.mediaType, statusCategory: { in: ['UNAVAILABLE', 'UPCOMING', 'SEARCHING', 'PROCESSING'] } },
         select: { tmdbId: true, tvdbId: true },
       });
 
@@ -42,7 +45,7 @@ export async function syncArrService(serviceType: string, since?: Date | null): 
 
       const toUpdate = availableItems.filter(m => needsUpdateIds.has(m.externalId));
       const combined = new Map<number, ArrMediaItem>();
-      for (const m of [...newlyAdded, ...toUpdate]) combined.set(m.externalId, m);
+      for (const m of [...newlyAdded, ...toUpdate, ...inProgressItems]) combined.set(m.externalId, m);
       filtered = [...combined.values()];
 
       if (needsUpdateIds.size > 0) {
@@ -93,7 +96,7 @@ export async function syncArrService(serviceType: string, since?: Date | null): 
             mediaId: p.mediaId,
             seasonNumber: s.seasonNumber,
             episodeCount: s.totalEpisodeCount,
-            status: s.status,
+            statusCategory: s.statusCategory,
           })),
       );
       await prisma.$transaction([
@@ -105,11 +108,7 @@ export async function syncArrService(serviceType: string, since?: Date | null): 
 
     // Update last sync timestamp
     const syncField = client.mediaType === 'movie' ? 'lastRadarrSync' : 'lastSonarrSync';
-    await prisma.appSettings.upsert({
-      where: { id: 1 },
-      update: { [syncField]: new Date() },
-      create: { id: 1, [syncField]: new Date(), updatedAt: new Date() },
-    });
+    await patchAppSettings({ [syncField]: new Date() });
   } catch (err) {
     logEvent('error', 'Sync', `${serviceType} sync failed: ${err}`);
     errors++;
@@ -155,16 +154,6 @@ async function bulkFetchExisting(
   return map;
 }
 
-/** True iff the error is a P2002 unique-constraint violation on `(tmdbId, mediaType)`. */
-function isTmdbMediaTypeConflict(err: unknown): boolean {
-  if (!err || typeof err !== 'object') return false;
-  const e = err as { code?: string; meta?: { target?: unknown } };
-  if (e.code !== 'P2002') return false;
-  const target = e.meta?.target;
-  if (Array.isArray(target)) return target.includes('tmdbId') && target.includes('mediaType');
-  return typeof target === 'string' && target.includes('tmdbId');
-}
-
 async function createMedia(item: ArrMediaItem, client: ArrClient): Promise<void> {
   if (client.mediaType === 'movie') {
     await prisma.media.create({
@@ -174,10 +163,10 @@ async function createMedia(item: ArrMediaItem, client: ArrClient): Promise<void>
         title: item.title,
         posterPath: item.posterPath,
         backdropPath: item.backdropPath,
-        status: item.status,
+        statusCategory: item.statusCategory,
         radarrId: item.serviceMediaId,
         qualityProfileId: item.qualityProfileId,
-        ...(item.status === 'available' ? { availableAt: new Date() } : {}),
+        ...(item.statusCategory === 'AVAILABLE' ? { availableAt: new Date() } : {}),
       },
     });
     return;
@@ -192,10 +181,10 @@ async function createMedia(item: ArrMediaItem, client: ArrClient): Promise<void>
       title: item.title,
       posterPath: item.posterPath,
       backdropPath: item.backdropPath,
-      status: item.status,
+      statusCategory: item.statusCategory,
       sonarrId: item.serviceMediaId,
       qualityProfileId: item.qualityProfileId,
-      ...(item.status === 'available' ? { availableAt: new Date() } : {}),
+      ...(item.statusCategory === 'AVAILABLE' ? { availableAt: new Date() } : {}),
     },
   });
   if (item.seasons?.length) {
@@ -206,7 +195,7 @@ async function createMedia(item: ArrMediaItem, client: ArrClient): Promise<void>
           mediaId: created.id,
           seasonNumber: s.seasonNumber,
           episodeCount: s.totalEpisodeCount,
-          status: s.status,
+          statusCategory: s.statusCategory,
         })),
     });
   }
@@ -219,63 +208,8 @@ async function applyUpdate(
 ): Promise<void> {
   await prisma.$transaction(async (tx) => {
     await tx.media.update({ where: { id: existing.id }, data: updateData });
-    if (becameAvailable) {
-      await tx.mediaRequest.updateMany({
-        where: { mediaId: existing.id, status: { in: [...COMPLETABLE_REQUEST_STATUSES] } },
-        data: { status: 'available' },
-      });
-    }
+    if (becameAvailable) await cascadeRequestsForCategory(existing.id, 'AVAILABLE', tx);
   });
-}
-
-/** Merge a placeholder TV row into the canonical positive-tmdbId row, deleting the placeholder.
- *  Dedups requests by userId so re-parenting doesn't multiply rows when both sides already had
- *  one for the same user. Atomic: races on the unique key are resolved by retrying merge from
- *  the caller's catch, never by leaving the DB partially merged. */
-async function mergeIntoCanonical(
-  placeholder: Media,
-  canonicalId: number,
-  item: ArrMediaItem,
-  updateData: Record<string, unknown>,
-  becameAvailable: boolean,
-): Promise<void> {
-  const seasonRows = (item.seasons ?? [])
-    .filter((s) => s.seasonNumber > 0)
-    .map((s) => ({
-      mediaId: canonicalId,
-      seasonNumber: s.seasonNumber,
-      episodeCount: s.totalEpisodeCount,
-      status: s.status,
-    }));
-  const { tmdbId: _drop, ...mergeData } = updateData;
-
-  await prisma.$transaction(async (tx) => {
-    const canonicalRequesters = await tx.mediaRequest.findMany({
-      where: { mediaId: canonicalId },
-      select: { userId: true },
-    });
-    const dupUserIds = canonicalRequesters.map((r) => r.userId);
-    if (dupUserIds.length > 0) {
-      await tx.mediaRequest.deleteMany({
-        where: { mediaId: placeholder.id, userId: { in: dupUserIds } },
-      });
-    }
-    await tx.mediaRequest.updateMany({ where: { mediaId: placeholder.id }, data: { mediaId: canonicalId } });
-    await tx.season.deleteMany({ where: { mediaId: placeholder.id } });
-    await tx.media.delete({ where: { id: placeholder.id } });
-    await tx.media.update({ where: { id: canonicalId }, data: mergeData });
-    if (seasonRows.length > 0) {
-      await tx.season.deleteMany({ where: { mediaId: canonicalId } });
-      await tx.season.createMany({ data: seasonRows });
-    }
-    if (becameAvailable) {
-      await tx.mediaRequest.updateMany({
-        where: { mediaId: canonicalId, status: { in: [...COMPLETABLE_REQUEST_STATUSES] } },
-        data: { status: 'available' },
-      });
-    }
-  });
-  logEvent('debug', 'Sync', `Merged placeholder TV row ${placeholder.id} into canonical row ${canonicalId} (tvdb:${item.externalId})`);
 }
 
 async function processSingleMedia(
@@ -290,9 +224,9 @@ async function processSingleMedia(
     return 'added';
   }
 
-  const becameAvailable = item.status === 'available' && existing.status !== 'available';
+  const becameAvailable = item.statusCategory === 'AVAILABLE' && existing.statusCategory !== 'AVAILABLE';
   if (becameAvailable) {
-    logEvent('debug', 'Sync', `"${item.title}" (${client.serviceType}:${item.externalId}) status: ${existing.status} -> ${item.status}`);
+    logEvent('debug', 'Sync', `"${item.title}" (${client.serviceType}:${item.externalId}) status: ${existing.statusCategory} -> ${item.statusCategory}`);
     sendAvailabilityNotifications(
       existing.title || item.title,
       client.mediaType,
@@ -304,7 +238,7 @@ async function processSingleMedia(
 
   const updateData: Record<string, unknown> = {
     [client.dbIdField]: item.serviceMediaId,
-    status: item.status,
+    statusCategory: item.statusCategory,
     qualityProfileId: item.qualityProfileId,
     title: existing.title || item.title,
     ...(item.posterPath && !existing.posterPath ? { posterPath: item.posterPath } : {}),
@@ -328,7 +262,8 @@ async function processSingleMedia(
           select: { id: true },
         });
         if (!canonical) throw err;
-        await mergeIntoCanonical(existing, canonical.id, item, updateData, becameAvailable);
+        const seasons = (item.seasons ?? []).filter((s) => s.seasonNumber > 0).map((s) => ({ seasonNumber: s.seasonNumber, episodeCount: s.totalEpisodeCount, statusCategory: s.statusCategory }));
+        await mergeTvPlaceholderInto(existing, canonical.id, updateData, { seasons, becameAvailable });
         return 'merged';
       }
     }

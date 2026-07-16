@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { MediaStateCategory } from '@oscarr/shared';
 
 // ─── Arr Client Shared Types ────────────────────────────────────────
 
@@ -16,7 +17,7 @@ export interface ArrMediaItem {
    *  placeholder, so home-page batch-status queries (which key by positive tmdbId) match. */
   tmdbId?: number;
   title: string;
-  status: string;
+  statusCategory: MediaStateCategory;
   posterPath: string | null;
   backdropPath: string | null;
   qualityProfileId: number;
@@ -32,7 +33,7 @@ export interface ArrSeasonItem {
   episodeFileCount: number;
   totalEpisodeCount: number;
   percentComplete: number;
-  status: string;
+  statusCategory: MediaStateCategory;
 }
 
 export interface ArrAvailabilityResult {
@@ -162,6 +163,9 @@ export interface ServiceDefinition {
    *  lidarr=['music']). Used by `getServiceTypeForMedia(mediaType)` without a hardcoded
    *  lookup. Services that don't participate in media routing (plex, tautulli) omit this. */
   handlesMediaTypes?: readonly string[];
+  /** Media DB column holding this service's *arr id (radarr→radarrId, sonarr→sonarrId). Lets the
+   *  core resolve the column from the module registry instead of hardcoding service ids. */
+  dbIdField?: 'radarrId' | 'sonarrId';
   /** True until this connector has been validated against a real instance by the maintainer.
    *  Surfaces an "Untested" pill in the picker and a feedback banner once selected, so users
    *  know to report back. Removed in the same commit that confirms the integration works. */

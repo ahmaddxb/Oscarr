@@ -1,24 +1,18 @@
-import axios, { type AxiosInstance } from 'axios';
-import type { ArrClient, ArrTag, ArrQualityProfile, ArrRootFolder, ArrMediaItem, ArrAvailabilityResult, ArrHistoryEntry, ArrAddMediaOptions, ArrEpisode, ArrWebhookEvent } from '../types.js';
+import type { ArrClient, ArrMediaItem, ArrAvailabilityResult, ArrHistoryEntry, ArrAddMediaOptions, ArrEpisode, ArrWebhookEvent } from '../types.js';
 import { extractImageFromArr } from '../types.js';
 import type { SonarrSeries, SonarrSeason, SonarrQueueItem, SonarrEpisode, SonarrEpisodeFile, SonarrHistoryRecord } from './types.js';
+import type { MediaStateCategory } from '@oscarr/shared';
 import { logEvent } from '../../utils/logEvent.js';
-import { attachAxiosRetry } from '../../utils/fetchWithRetry.js';
+import { ArrClientBase } from '../arrClientBase.js';
 
-export class SonarrClient implements ArrClient {
+export class SonarrClient extends ArrClientBase implements ArrClient {
   readonly mediaType = 'tv' as const;
   readonly serviceType = 'sonarr';
   readonly dbIdField = 'sonarrId' as const;
   readonly defaultRootFolder = '/tv';
 
-  private readonly api: AxiosInstance;
-
   constructor(url: string, apiKey: string) {
-    this.api = attachAxiosRetry(axios.create({
-      baseURL: `${url}/api/v3`,
-      params: { apikey: apiKey },
-      timeout: 5000,
-    }), 'Sonarr');
+    super(url, apiKey, 'Sonarr');
   }
 
   async getSeries(): Promise<SonarrSeries[]> {
@@ -88,40 +82,6 @@ export class SonarrClient implements ArrClient {
     return data;
   }
 
-  async getQualityProfiles(): Promise<ArrQualityProfile[]> {
-    const { data } = await this.api.get('/qualityprofile');
-    return data;
-  }
-
-  async getRootFolders(): Promise<ArrRootFolder[]> {
-    const { data } = await this.api.get('/rootfolder');
-    return data;
-  }
-
-  async getSystemStatus(): Promise<{ version: string }> {
-    const { data } = await this.api.get('/system/status');
-    return data;
-  }
-
-  async getTags(): Promise<ArrTag[]> {
-    const { data } = await this.api.get('/tag');
-    return data;
-  }
-
-  async createTag(label: string): Promise<ArrTag> {
-    const { data } = await this.api.post('/tag', { label });
-    return data;
-  }
-
-  async getOrCreateTag(username: string): Promise<number> {
-    const label = `oscarr-${username}`.toLowerCase().replaceAll(/[^a-z0-9-]/g, '');
-    const tags = await this.getTags();
-    const existing = tags.find((t) => t.label === label);
-    if (existing) return existing.id;
-    const created = await this.createTag(label);
-    return created.id;
-  }
-
   async getEpisodes(seriesId: number, seasonNumber?: number): Promise<SonarrEpisode[]> {
     const params: Record<string, unknown> = { seriesId };
     if (seasonNumber !== undefined) params.seasonNumber = seasonNumber;
@@ -170,30 +130,31 @@ export class SonarrClient implements ArrClient {
 
   // ─── Normalized interface methods ─────────────────────────────────
 
-  private getSeriesStatus(show: SonarrSeries): string {
-    const stats = show.statistics;
-    if (!stats) return 'unknown';
-    if (stats.percentOfEpisodes >= 100) return 'available';
-    if (stats.episodeFileCount > 0) return 'processing';
-    if (show.monitored) return 'pending';
-    return 'unknown';
+  /** Maps native Sonarr state to the Oscarr vocabulary. Reused for series and seasons. */
+  private resolveState(
+    stats: { percentOfEpisodes: number; episodeFileCount: number } | undefined,
+    monitored: boolean,
+    inActiveQueue: boolean,
+    nativeStatus?: string,
+  ): MediaStateCategory {
+    if (stats && stats.percentOfEpisodes >= 100) return 'AVAILABLE';
+    if (inActiveQueue) return 'PROCESSING';
+    if (stats && stats.episodeFileCount > 0) return 'PROCESSING';
+    if (nativeStatus === 'upcoming') return 'UPCOMING';
+    if (monitored) return 'SEARCHING';
+    return 'UNAVAILABLE';
   }
 
-  private getSeasonStatus(season: { monitored: boolean; statistics?: { percentOfEpisodes: number; episodeFileCount: number } }): string {
-    if (!season.statistics) return 'unknown';
-    if (season.statistics.percentOfEpisodes >= 100) return 'available';
-    if (season.statistics.episodeFileCount > 0) return 'processing';
-    if (season.monitored) return 'pending';
-    return 'unknown';
-  }
-
-  private seriesToArrItem(show: SonarrSeries): ArrMediaItem {
+  private seriesToArrItem(
+    show: SonarrSeries,
+    active: { seriesIds: ReadonlySet<number>; seasonKeys: ReadonlySet<string> },
+  ): ArrMediaItem {
     return {
       serviceMediaId: show.id,
       externalId: show.tvdbId,
       tmdbId: show.tmdbId && show.tmdbId > 0 ? show.tmdbId : undefined,
       title: show.title,
-      status: this.getSeriesStatus(show),
+      statusCategory: this.resolveState(show.statistics, show.monitored, active.seriesIds.has(show.id), show.status),
       posterPath: extractImageFromArr(show.images, 'poster'),
       backdropPath: extractImageFromArr(show.images, 'fanart'),
       qualityProfileId: show.qualityProfileId,
@@ -208,20 +169,37 @@ export class SonarrClient implements ArrClient {
           episodeFileCount: s.statistics?.episodeFileCount ?? 0,
           totalEpisodeCount: s.statistics?.totalEpisodeCount ?? 0,
           percentComplete: s.statistics?.percentOfEpisodes ?? 0,
-          status: this.getSeasonStatus(s),
+          // no per-season status from Sonarr → nativeStatus omitted (seasons never UPCOMING)
+          statusCategory: this.resolveState(s.statistics, s.monitored, active.seasonKeys.has(`${show.id}:${s.seasonNumber}`)),
         })),
     };
   }
 
+  /** Sonarr download queue → active series ids + seriesId:seasonNumber keys (⇒ PROCESSING). */
+  private async getActiveQueue(): Promise<{ seriesIds: Set<number>; seasonKeys: Set<string> }> {
+    try {
+      const { records } = await this.getQueue();
+      const seriesIds = new Set<number>();
+      const seasonKeys = new Set<string>();
+      for (const r of records) {
+        seriesIds.add(r.seriesId);
+        if (r.episode?.seasonNumber != null) seasonKeys.add(`${r.seriesId}:${r.episode.seasonNumber}`);
+      }
+      return { seriesIds, seasonKeys };
+    } catch {
+      return { seriesIds: new Set(), seasonKeys: new Set() };
+    }
+  }
+
   async getAllMedia(): Promise<ArrMediaItem[]> {
-    const series = await this.getSeries();
-    return series.map((s) => this.seriesToArrItem(s));
+    const [series, active] = await Promise.all([this.getSeries(), this.getActiveQueue()]);
+    return series.map((s) => this.seriesToArrItem(s, active));
   }
 
   async getMediaById(serviceMediaId: number): Promise<ArrMediaItem | null> {
     try {
-      const series = await this.getSeriesById(serviceMediaId);
-      return series ? this.seriesToArrItem(series) : null;
+      const [series, active] = await Promise.all([this.getSeriesById(serviceMediaId), this.getActiveQueue()]);
+      return series ? this.seriesToArrItem(series, active) : null;
     } catch (err) {
       if ((err as { response?: { status?: number } })?.response?.status === 404) return null;
       throw err;
@@ -351,15 +329,6 @@ export class SonarrClient implements ArrClient {
       ],
     });
     return data.id;
-  }
-
-  async removeWebhook(webhookId: number): Promise<void> {
-    await this.api.delete(`/notification/${webhookId}`);
-  }
-
-  async checkWebhookExists(webhookId: number): Promise<boolean> {
-    const { data } = await this.api.get('/notification');
-    return Array.isArray(data) && data.some((n: { id: number }) => n.id === webhookId);
   }
 
   getWebhookEvents() {

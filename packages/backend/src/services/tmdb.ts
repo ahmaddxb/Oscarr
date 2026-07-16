@@ -15,7 +15,7 @@ if (!process.env.TMDB_API_TOKEN) {
     'Get your own at https://www.themoviedb.org/settings/api to avoid shared rate limits.');
 }
 
-import { prisma } from '../utils/prisma.js';
+import { getAppSettings, parseInstanceLanguages } from '../utils/appSettings.js';
 
 const DEFAULT_LANG = 'en';
 
@@ -31,8 +31,8 @@ export function invalidateLanguageCache(): void {
 
 export async function getInstanceLanguages(): Promise<string[]> {
   if (_cachedLangs && Date.now() - _cachedAt < 300_000) return _cachedLangs;
-  const settings = await prisma.appSettings.findUnique({ where: { id: 1 }, select: { instanceLanguages: true } });
-  const parsed: string[] = settings?.instanceLanguages ? JSON.parse(settings.instanceLanguages) : ['en'];
+  const settings = await getAppSettings();
+  const parsed = parseInstanceLanguages(settings?.instanceLanguages);
   _cachedLangs = parsed.includes('en') ? parsed : [...parsed, 'en'];
   _cachedAt = Date.now();
   return _cachedLangs;
@@ -87,20 +87,6 @@ export type {
   TmdbVideo, TmdbMedia, TmdbMediaResult, TmdbPerson,
 } from '@oscarr/shared';
 import type { TmdbMovie, TmdbTv, TmdbMediaResult, TmdbPerson, TmdbCollection } from '@oscarr/shared';
-
-const ANIME_COUNTRIES = new Set(['JP', 'KR', 'CN', 'TW']);
-const ANIMATION_GENRE_ID = 16;
-
-export function isAnime(tv: TmdbTv): boolean {
-  const isAnimation = tv.genres?.some(g => g.id === ANIMATION_GENRE_ID)
-    || tv.genre_ids?.includes(ANIMATION_GENRE_ID)
-    || false;
-
-  const isAsianOrigin = tv.origin_country?.some(c => ANIME_COUNTRIES.has(c))
-    || (tv.original_language ? ['ja', 'ko', 'zh'].includes(tv.original_language) : false);
-
-  return isAnimation && isAsianOrigin;
-}
 
 /** Extract keywords array from movie or TV details (different TMDB response shapes) */
 export function extractKeywords(details: TmdbMovie | TmdbTv): { id: number; name: string }[] {

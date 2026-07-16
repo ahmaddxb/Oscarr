@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from 'fastify';
 import { pluginEventBus } from '../eventBus.js';
 import { prisma } from '../../utils/prisma.js';
+import { getAppSettings as getAppSettingsSingleton } from '../../utils/appSettings.js';
 import { getPluginDataDir } from '../../utils/dataPath.js';
 import { getKV, openPluginDb, migrate as migrateDb, type PluginDatabase, type Migration } from '../storage/index.js';
 import { scrubSecrets } from '../../utils/logScrubber.js';
@@ -9,6 +10,7 @@ import type { NotificationPayload } from '../../notifications/types.js';
 import { sendUserNotification } from '../../services/userNotifications.js';
 import { getArrClient, createArrClient } from '../../providers/index.js';
 import { getAllServices, parseServiceConfig } from '../../utils/services.js';
+import { mediaKey } from '../../utils/mediaKey.js';
 import type { ArrClient } from '../../providers/types.js';
 import { searchMulti, getMovieDetails, getTvDetails } from '../../services/tmdb.js';
 import { createUserRequest } from '../../services/requestService.js';
@@ -20,7 +22,7 @@ import type {
   PluginMediaBatchStatus,
   PluginFolderRule,
 } from '@oscarr/shared';
-import { ACTIVE_REQUEST_STATUSES } from '@oscarr/shared';
+import { ACTIVE_REQUEST_STATUSES, toMediaStateCategory } from '@oscarr/shared';
 import {
   registerRoutePermission as rbacRegisterRoute,
   registerPluginPermission as rbacRegisterPermission,
@@ -226,7 +228,7 @@ export function createContextV1(manifest: PluginManifest, deps: V1FactoryDeps): 
     },
     async getAppSettings() {
       req('settings:app', 'getAppSettings');
-      const s = await prisma.appSettings.findUnique({ where: { id: 1 } });
+      const s = await getAppSettingsSingleton();
       return (s ?? {}) as Record<string, unknown>;
     },
     async getSetting(key: string) {
@@ -293,16 +295,7 @@ export function createContextV1(manifest: PluginManifest, deps: V1FactoryDeps): 
     },
     registerRoutePermission(routeKey: string, rule: { permission: string; ownerScoped?: boolean }) {
       req('permissions', 'registerRoutePermission');
-      // A plugin can only rewrite RBAC rules for routes under its own namespace — without this
-      // guard a plugin with the `permissions` capability could downgrade core admin routes
-      // (e.g. `POST:/api/plugins/install`) to $public and escalate arbitrarily.
-      const parsed = /^([A-Z]+):(\/.+)$/.exec(routeKey);
-      const allowedPrefix = `/api/plugins/${pluginId}/`;
-      if (!parsed || !parsed[2].startsWith(allowedPrefix)) {
-        throw new Error(
-          `Plugin "${pluginId}" may only register route permissions under ${allowedPrefix} (got "${routeKey}")`
-        );
-      }
+      // rbacRegisterRoute enforces the plugin-namespace guard (rejects keys outside /api/plugins/<id>/).
       rbacRegisterRoute(pluginId, routeKey, rule);
     },
     registerPluginPermission(permission: string, description?: string) {
@@ -408,10 +401,10 @@ export function createContextV1(manifest: PluginManifest, deps: V1FactoryDeps): 
           where: {
             OR: items.map(i => ({ tmdbId: i.tmdbId, mediaType: i.mediaType })),
           },
-          select: { id: true, tmdbId: true, mediaType: true, status: true },
+          select: { id: true, tmdbId: true, mediaType: true, statusCategory: true },
         });
-        const mediaByKey = new Map<string, { id: number; status: string }>();
-        for (const m of mediaRows) mediaByKey.set(`${m.mediaType}:${m.tmdbId}`, { id: m.id, status: m.status });
+        const mediaByKey = new Map<string, { id: number; statusCategory: string }>();
+        for (const m of mediaRows) mediaByKey.set(mediaKey(m), { id: m.id, statusCategory: m.statusCategory });
 
         const userRequestsByMediaId = new Map<number, string>();
         if (userId !== undefined && mediaRows.length > 0) {
@@ -436,7 +429,7 @@ export function createContextV1(manifest: PluginManifest, deps: V1FactoryDeps): 
           const m = mediaByKey.get(key);
           const userStatus = m ? userRequestsByMediaId.get(m.id) ?? null : null;
           out[key] = {
-            status: m?.status ?? 'unknown',
+            statusCategory: toMediaStateCategory(m?.statusCategory),
             userRequestStatus: userStatus,
             userHasActiveRequest: userStatus !== null,
           };
@@ -447,7 +440,7 @@ export function createContextV1(manifest: PluginManifest, deps: V1FactoryDeps): 
         req('requests:read', 'media.getById');
         const row = await prisma.media.findUnique({
           where: { id: mediaId },
-          select: { id: true, tmdbId: true, tvdbId: true, mediaType: true, title: true, posterPath: true, status: true },
+          select: { id: true, tmdbId: true, tvdbId: true, mediaType: true, title: true, posterPath: true, statusCategory: true },
         });
         if (!row) return null;
         return {
@@ -457,7 +450,7 @@ export function createContextV1(manifest: PluginManifest, deps: V1FactoryDeps): 
           mediaType: row.mediaType as 'movie' | 'tv',
           title: row.title,
           posterPath: row.posterPath,
-          status: row.status,
+          statusCategory: toMediaStateCategory(row.statusCategory),
         } satisfies PluginMedia;
       },
     },
@@ -474,7 +467,7 @@ export function createContextV1(manifest: PluginManifest, deps: V1FactoryDeps): 
           take: limit,
           select: {
             id: true, userId: true, mediaType: true, seasons: true, status: true, createdAt: true,
-            media: { select: { id: true, tmdbId: true, tvdbId: true, mediaType: true, title: true, posterPath: true, status: true } },
+            media: { select: { id: true, tmdbId: true, tvdbId: true, mediaType: true, title: true, posterPath: true, statusCategory: true } },
           },
         });
         return rows.map((r): PluginMediaRequest => ({
@@ -491,7 +484,7 @@ export function createContextV1(manifest: PluginManifest, deps: V1FactoryDeps): 
             mediaType: r.media.mediaType as 'movie' | 'tv',
             title: r.media.title,
             posterPath: r.media.posterPath,
-            status: r.media.status,
+            statusCategory: toMediaStateCategory(r.media.statusCategory),
           },
         }));
       },

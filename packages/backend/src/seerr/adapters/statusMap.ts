@@ -26,7 +26,7 @@ export const SEERR_MEDIA_STATUS = {
  * Overseerr only knows pending/approved/declined for the *request* itself; everything past
  * approval (processing, available, failed) is reflected on the linked media row, not the request.
  * So we collapse the post-approval Oscarr states to APPROVED at the request level — Maintainerr
- * & co. then read the actual download/availability state via Media.status.
+ * & co. then read the actual download/availability state via Media.statusCategory.
  */
 export function mapRequestStatus(oscarrStatus: string): number {
   if (oscarrStatus === 'pending') return SEERR_REQUEST_STATUS.PENDING;
@@ -35,19 +35,15 @@ export function mapRequestStatus(oscarrStatus: string): number {
   return SEERR_REQUEST_STATUS.APPROVED;
 }
 
-/**
- * Oscarr media status: "unknown" | "pending" | "processing" | "available" | "deleted"
- * Maps cleanly except for PARTIALLY_AVAILABLE — Oscarr doesn't currently distinguish a TV
- * series with some seasons available from one fully available, so callers should treat
- * AVAILABLE as "at least one season is available" for shows.
- */
-export function mapMediaStatus(oscarrStatus: string | null | undefined): number {
-  switch (oscarrStatus) {
-    case 'pending':    return SEERR_MEDIA_STATUS.PENDING;
-    case 'processing': return SEERR_MEDIA_STATUS.PROCESSING;
-    case 'available':  return SEERR_MEDIA_STATUS.AVAILABLE;
-    case 'deleted':    return SEERR_MEDIA_STATUS.DELETED;
-    default:           return SEERR_MEDIA_STATUS.UNKNOWN;
+/** MediaStateCategory → Overseerr MediaStatus (1-6 only; partial-TV/4 handled in buildSeerrMedia). */
+export function mapMediaStatus(category: string | null | undefined): number {
+  switch (category) {
+    case 'UPCOMING':    return SEERR_MEDIA_STATUS.PENDING;
+    case 'SEARCHING':   return SEERR_MEDIA_STATUS.PENDING;    // monitored/queued, not yet downloading
+    case 'PROCESSING':  return SEERR_MEDIA_STATUS.PROCESSING;
+    case 'AVAILABLE':   return SEERR_MEDIA_STATUS.AVAILABLE;
+    case 'BLACKLISTED': return SEERR_MEDIA_STATUS.UNKNOWN;    // no Overseerr 'blocked' state (7 is out of range)
+    default:            return SEERR_MEDIA_STATUS.UNKNOWN;    // UNAVAILABLE + unmapped
   }
 }
 

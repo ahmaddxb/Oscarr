@@ -1,24 +1,18 @@
-import axios, { type AxiosInstance } from 'axios';
-import type { ArrClient, ArrTag, ArrQualityProfile, ArrRootFolder, ArrMediaItem, ArrAvailabilityResult, ArrHistoryEntry, ArrAddMediaOptions, ArrWebhookEvent } from '../types.js';
+import type { ArrClient, ArrMediaItem, ArrAvailabilityResult, ArrHistoryEntry, ArrAddMediaOptions, ArrWebhookEvent } from '../types.js';
 import { extractImageFromArr } from '../types.js';
 import type { RadarrMovie, RadarrQueueItem, RadarrHistoryRecord } from './types.js';
+import type { MediaStateCategory } from '@oscarr/shared';
 import { logEvent } from '../../utils/logEvent.js';
-import { attachAxiosRetry } from '../../utils/fetchWithRetry.js';
+import { ArrClientBase } from '../arrClientBase.js';
 
-export class RadarrClient implements ArrClient {
+export class RadarrClient extends ArrClientBase implements ArrClient {
   readonly mediaType = 'movie' as const;
   readonly serviceType = 'radarr';
   readonly dbIdField = 'radarrId' as const;
   readonly defaultRootFolder = '/movies';
 
-  private readonly api: AxiosInstance;
-
   constructor(url: string, apiKey: string) {
-    this.api = attachAxiosRetry(axios.create({
-      baseURL: `${url}/api/v3`,
-      params: { apikey: apiKey },
-      timeout: 5000,
-    }), 'Radarr');
+    super(url, apiKey, 'Radarr');
   }
 
   async getMovies(): Promise<RadarrMovie[]> {
@@ -63,25 +57,6 @@ export class RadarrClient implements ArrClient {
     return data;
   }
 
-  async getTags(): Promise<ArrTag[]> {
-    const { data } = await this.api.get('/tag');
-    return data;
-  }
-
-  async createTag(label: string): Promise<ArrTag> {
-    const { data } = await this.api.post('/tag', { label });
-    return data;
-  }
-
-  async getOrCreateTag(username: string): Promise<number> {
-    const label = `oscarr-${username}`.toLowerCase().replaceAll(/[^a-z0-9-]/g, '');
-    const tags = await this.getTags();
-    const existing = tags.find((t) => t.label === label);
-    if (existing) return existing.id;
-    const created = await this.createTag(label);
-    return created.id;
-  }
-
   async getCalendar(start: string, end: string): Promise<RadarrMovie[]> {
     const { data } = await this.api.get('/calendar', { params: { start, end } });
     return data;
@@ -91,16 +66,6 @@ export class RadarrClient implements ArrClient {
     const { data } = await this.api.get('/queue', {
       params: { pageSize: 50, includeMovie: true },
     });
-    return data;
-  }
-
-  async getQualityProfiles(): Promise<ArrQualityProfile[]> {
-    const { data } = await this.api.get('/qualityprofile');
-    return data;
-  }
-
-  async getRootFolders(): Promise<ArrRootFolder[]> {
-    const { data } = await this.api.get('/rootfolder');
     return data;
   }
 
@@ -130,41 +95,24 @@ export class RadarrClient implements ArrClient {
     return all;
   }
 
-  async getSystemStatus(): Promise<{ version: string }> {
-    const { data } = await this.api.get('/system/status');
-    return data;
-  }
-
   // ─── Normalized interface methods ─────────────────────────────────
 
-  private getMovieStatus(movie: RadarrMovie): string {
-    if (movie.hasFile) return 'available';
-    if (!movie.monitored) return 'unknown';
-
-    const now = new Date();
-    const digitalRelease = movie.digitalRelease ? new Date(movie.digitalRelease) : null;
-    const physicalRelease = movie.physicalRelease ? new Date(movie.physicalRelease) : null;
-    const inCinemas = movie.inCinemas ? new Date(movie.inCinemas) : null;
-    const releaseDate = movie.releaseDate ? new Date(movie.releaseDate) : null;
-
-    // A movie is "upcoming" only if ALL known release dates are in the future.
-    // If it's already in cinemas, it's not upcoming — it's searching (for digital release).
-    const earliestRelease = [inCinemas, digitalRelease, physicalRelease, releaseDate]
-      .filter((d): d is Date => d !== null)
-      .sort((a, b) => a.getTime() - b.getTime())[0];
-
-    if (earliestRelease && earliestRelease > now) {
-      return 'upcoming';
-    }
-    return 'searching';
+  /** Maps native Radarr state (+ queue presence) to the Oscarr vocabulary. */
+  private resolveState(movie: RadarrMovie, inActiveQueue: boolean): MediaStateCategory {
+    if (movie.hasFile) return 'AVAILABLE';
+    if (inActiveQueue) return 'PROCESSING';
+    if (!movie.monitored) return 'UNAVAILABLE';
+    // Transport Radarr's own signal: isAvailable=false (announced or cinema-only) → UPCOMING.
+    if (!movie.isAvailable) return 'UPCOMING';
+    return 'SEARCHING';
   }
 
-  private movieToArrItem(movie: RadarrMovie): ArrMediaItem {
+  private movieToArrItem(movie: RadarrMovie, activeQueueIds: ReadonlySet<number>): ArrMediaItem {
     return {
       serviceMediaId: movie.id,
       externalId: movie.tmdbId,
       title: movie.title,
-      status: this.getMovieStatus(movie),
+      statusCategory: this.resolveState(movie, activeQueueIds.has(movie.id)),
       posterPath: extractImageFromArr(movie.images, 'poster'),
       backdropPath: extractImageFromArr(movie.images, 'fanart'),
       qualityProfileId: movie.qualityProfileId,
@@ -174,15 +122,28 @@ export class RadarrClient implements ArrClient {
     };
   }
 
+  /** movieIds currently in the download queue (⇒ PROCESSING). Best-effort. */
+  private async getActiveQueueIds(): Promise<Set<number>> {
+    try {
+      const { records } = await this.getQueue();
+      return new Set(records.map((r) => r.movieId));
+    } catch {
+      return new Set();
+    }
+  }
+
   async getAllMedia(): Promise<ArrMediaItem[]> {
-    const movies = await this.getMovies();
-    return movies.map((m) => this.movieToArrItem(m));
+    const [movies, activeQueueIds] = await Promise.all([this.getMovies(), this.getActiveQueueIds()]);
+    return movies.map((m) => this.movieToArrItem(m, activeQueueIds));
   }
 
   async getMediaById(serviceMediaId: number): Promise<ArrMediaItem | null> {
     try {
-      const { data } = await this.api.get<RadarrMovie>(`/movie/${serviceMediaId}`);
-      return data ? this.movieToArrItem(data) : null;
+      const [{ data }, activeQueueIds] = await Promise.all([
+        this.api.get<RadarrMovie>(`/movie/${serviceMediaId}`),
+        this.getActiveQueueIds(),
+      ]);
+      return data ? this.movieToArrItem(data, activeQueueIds) : null;
     } catch (err) {
       if ((err as { response?: { status?: number } })?.response?.status === 404) return null;
       throw err;
@@ -262,15 +223,6 @@ export class RadarrClient implements ArrClient {
       ],
     });
     return data.id;
-  }
-
-  async removeWebhook(webhookId: number): Promise<void> {
-    await this.api.delete(`/notification/${webhookId}`);
-  }
-
-  async checkWebhookExists(webhookId: number): Promise<boolean> {
-    const { data } = await this.api.get('/notification');
-    return Array.isArray(data) && data.some((n: { id: number }) => n.id === webhookId);
   }
 
   getWebhookEvents() {

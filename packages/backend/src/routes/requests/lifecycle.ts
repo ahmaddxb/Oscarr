@@ -4,6 +4,8 @@ import { logEvent } from '../../utils/logEvent.js';
 import { safeNotify, safeUserNotify, buildSiteLink } from '../../utils/safeNotify.js';
 import { parseId } from '../../utils/params.js';
 import { sendToService } from '../../services/requestService.js';
+import { transitionRequestStatus } from '../../services/requestStatusTransition.js';
+import type { RequestStatusKind } from '@oscarr/shared';
 
 /** Per-request state transitions — approve, decline, edit routing, delete. Owner-scoping on
  *  delete prevents a non-admin from deleting someone else's request. */
@@ -14,7 +16,7 @@ export async function requestLifecycleRoutes(app: FastifyInstance) {
       body: { type: 'object', properties: { qualityOptionId: { type: 'number' } } },
     },
   }, async (request, reply) => {
-    const user = request.user as { id: number };
+    const user = request.user;
     const requestId = parseId((request.params as { id: string }).id);
     if (!requestId) return reply.status(400).send({ error: 'Invalid ID' });
     const { qualityOptionId: overrideQuality } = (request.body as { qualityOptionId?: number }) || {};
@@ -37,20 +39,25 @@ export async function requestLifecycleRoutes(app: FastifyInstance) {
 
     // Flip to 'searching' so the UI reflects the service-side pickup; preserve 'available' and
     // 'processing' (TV partial) so the "request rest" CTA stays visible.
-    if (sent && mediaRequest.media.status !== 'available' && mediaRequest.media.status !== 'processing') {
+    if (sent && mediaRequest.media.statusCategory !== 'AVAILABLE' && mediaRequest.media.statusCategory !== 'PROCESSING') {
       await prisma.media.update({
         where: { id: mediaRequest.media.id },
-        data: { status: 'searching' },
+        data: { statusCategory: 'SEARCHING' },
       }).catch((err) => {
         request.log.warn({ err, mediaId: mediaRequest.media.id, requestId }, 'status flip to searching failed');
       });
     }
 
-    const updated = await prisma.mediaRequest.update({
-      where: { id: requestId },
-      data: { status: sent ? 'approved' : 'failed', approvedById: user.id },
-      include: { media: true, user: { select: { id: true, displayName: true, avatar: true } }, qualityOption: { select: { id: true, label: true } } },
-    });
+    const nextStatus: RequestStatusKind = sent ? 'approved' : 'failed';
+    const updated = await transitionRequestStatus(
+      { requestId, from: mediaRequest.status as RequestStatusKind, to: nextStatus, why: sent ? 'admin-approve' : 'dispatch-failed' },
+      () => prisma.mediaRequest.update({
+        where: { id: requestId },
+        data: { status: nextStatus, approvedById: user.id },
+        include: { media: true, user: { select: { id: true, displayName: true, avatar: true } }, qualityOption: { select: { id: true, label: true } } },
+      }),
+      request.log,
+    );
 
     if (sent) {
       const approvedUrl = await buildSiteLink(`/${updated.mediaType}/${updated.media.tmdbId}`);
@@ -67,15 +74,25 @@ export async function requestLifecycleRoutes(app: FastifyInstance) {
   app.post('/:id/decline', {
     schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } } },
   }, async (request, reply) => {
-    const user = request.user as { id: number };
+    const user = request.user;
     const requestId = parseId((request.params as { id: string }).id);
     if (!requestId) return reply.status(400).send({ error: 'Invalid ID' });
 
-    const updated = await prisma.mediaRequest.update({
+    const current = await prisma.mediaRequest.findUnique({
       where: { id: requestId },
-      data: { status: 'declined', approvedById: user.id },
-      include: { media: true, user: { select: { id: true, displayName: true, avatar: true } } },
+      select: { status: true },
     });
+    if (!current) return reply.status(404).send({ error: 'Request not found' });
+    if (current.status !== 'pending') return reply.status(400).send({ error: 'This request cannot be declined' });
+    const updated = await transitionRequestStatus(
+      { requestId, from: current.status as RequestStatusKind, to: 'declined', why: 'admin-decline' },
+      () => prisma.mediaRequest.update({
+        where: { id: requestId },
+        data: { status: 'declined', approvedById: user.id },
+        include: { media: true, user: { select: { id: true, displayName: true, avatar: true } } },
+      }),
+      request.log,
+    );
 
     const declinedUrl = await buildSiteLink(`/${updated.mediaType}/${updated.media.tmdbId}`);
     safeNotify('request_declined', { title: updated.media.title, mediaType: updated.mediaType as 'movie' | 'tv', username: updated.user?.displayName || 'User', posterPath: updated.media.posterPath, url: declinedUrl });
@@ -115,7 +132,7 @@ export async function requestLifecycleRoutes(app: FastifyInstance) {
   app.delete('/:id', {
     schema: { params: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } } },
   }, async (request, reply) => {
-    const user = request.user as { id: number };
+    const user = request.user;
     const requestId = parseId((request.params as { id: string }).id);
     if (!requestId) return reply.status(400).send({ error: 'Invalid ID' });
 

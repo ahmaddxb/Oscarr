@@ -7,6 +7,7 @@
 
 export const REQUEST_STATUSES = ['pending', 'approved', 'declined', 'processing', 'available', 'failed'] as const;
 export type RequestStatus = typeof REQUEST_STATUSES[number];
+export type RequestStatusKind = RequestStatus;
 
 /** Statuses that block a user from creating a duplicate request. */
 export const ACTIVE_REQUEST_STATUSES: readonly RequestStatus[] = ['pending', 'approved', 'processing', 'failed'];
